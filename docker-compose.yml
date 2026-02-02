@@ -1,21 +1,92 @@
+# version: '3.8'
+
+# services:
+#   postgres:
+#     image: postgres:16-alpine
+#     environment:
+#       POSTGRES_USER: centro
+#       POSTGRES_PASSWORD: centro
+#       POSTGRES_DB: centro
+#     ports:
+#       - "5432:5432"
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+
+#   redis:
+#     image: redis:7-alpine
+#     ports:
+#       - "6379:6379"
+
+# volumes:
+#   postgres_data:
+
+
 version: '3.8'
 
 services:
+  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
+    container_name: personx-postgres
     environment:
-      POSTGRES_USER: centro
-      POSTGRES_PASSWORD: centro
-      POSTGRES_DB: centro
+      POSTGRES_USER: ${POSTGRES_USER:-personx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-personx_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-personx_ai}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-personx}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - personx-network
 
+  # Redis Cache
   redis:
     image: redis:7-alpine
+    container_name: personx-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - personx-network
+
+  # PgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: personx-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@personx.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - personx-network
+    profiles:
+      - tools  # Only start with: docker-compose --profile tools up
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  personx-network:
+    driver: bridge

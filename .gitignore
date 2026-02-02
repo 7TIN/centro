@@ -1,39 +1,82 @@
 # Python
 __pycache__/
 *.py[cod]
-*.class
+*$py.class
 *.so
 .Python
-.venv/
-venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Environment
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Environment variables
 .env
 .env.local
 
-# IDEs
+# IDEs & Editors
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.mypy_cache/
-.ruff_cache/
-
-# Data
-data/logs/
-*.db
-*.sqlite
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Build
-dist/
-build/
-*.egg-info/
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Logs
+*.log
+logs/
+data/logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Documentation
+docs/_build/
+docs/
+
+# uv
+.uv/
+
+# Docker volumes
+postgres_data/
+redis_data/
+pgadmin_data/
+
+# Alembic
+# Keep versions directory but ignore specific migration files if needed
+# alembic/versions/*.py
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb

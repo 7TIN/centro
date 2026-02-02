@@ -17,3 +17,48 @@ AI personality and assistant built with FastAPI, LangGraph, and LangChain.
 - data/ - Knowledge base and embeddings
 - 	ests/ - Test files
 - scripts/ - Utility scripts
+
+```
+centro
+├─ alembic
+│  └─ versions
+├─ config
+│  ├─ prompts.py
+│  ├─ settings.py
+│  └─ __init__.py
+├─ data
+│  ├─ embeddings
+│  └─ knowledge_base
+├─ docker-compose.yml
+├─ Dockerfile
+├─ pyproject.toml
+├─ README.md
+├─ scripts
+│  ├─ ingest_knowledge.py
+│  └─ __init__.py
+├─ setup_structure.ps1
+├─ src
+│  ├─ agents
+│  │  ├─ orchestrator.py
+│  │  └─ __init__.py
+│  ├─ api
+│  │  └─ v1
+│  │     └─ routes
+│  │        ├─ routes.py
+│  │        └─ __init__.py
+│  ├─ core
+│  │  └─ __init__.py
+│  ├─ models
+│  │  └─ __init__.py
+│  └─ services
+│     ├─ memory.py
+│     ├─ vector_store.py
+│     └─ __init__.py
+├─ tests
+│  ├─ integration
+│  │  └─ __init__.py
+│  └─ unit
+│     └─ __init__.py
+└─ uv.lock
+
+```

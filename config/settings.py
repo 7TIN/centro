@@ -1,27 +1,144 @@
-from pydantic_settings import BaseSettings
+# from pydantic_settings import BaseSettings
+
+# class Settings(BaseSettings):
+#     # LLM Configuration
+#     anthropic_api_key: str
+#     openai_api_key: str
+#     primary_model: str = "claude-sonnet-4-20250514"
+#     fallback_model: str = "gpt-4"
+    
+#     # Vector DB
+#     pinecone_api_key: str
+#     pinecone_index: str = "personx-knowledge"
+#     embedding_model: str = "text-embedding-3-small"
+    
+#     # Database
+#     database_url: str
+#     redis_url: str
+    
+#     # App Settings
+#     max_context_tokens: int = 8000
+#     conversation_ttl: int = 86400  # 24 hours
+#     enable_caching: bool = True
+    
+#     class Config:
+#         env_file = ".env"
+
+# settings = Settings()
+
+"""
+Application settings using Pydantic BaseSettings.
+Loads configuration from environment variables.
+"""
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
-    # LLM Configuration
-    anthropic_api_key: str
-    openai_api_key: str
-    primary_model: str = "claude-sonnet-4-20250514"
-    fallback_model: str = "gpt-4"
+    """Application settings loaded from environment variables."""
     
-    # Vector DB
-    pinecone_api_key: str
-    pinecone_index: str = "personx-knowledge"
-    embedding_model: str = "text-embedding-3-small"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
+    
+    # Application
+    environment: Literal["development", "staging", "production"] = "development"
+    debug: bool = True
+    api_version: str = "v1"
+    app_name: str = "PersonX AI Assistant"
+    
+    # Server
+    host: str = "0.0.0.0"
+    port: int = 8000
     
     # Database
-    database_url: str
-    redis_url: str
+    postgres_user: str
+    postgres_password: str
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str
+    database_url: str | None = None
     
-    # App Settings
-    max_context_tokens: int = 8000
-    conversation_ttl: int = 86400  # 24 hours
-    enable_caching: bool = True
+    # Redis
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str = ""
+    redis_db: int = 0
     
-    class Config:
-        env_file = ".env"
+    # LLM API Keys
+    anthropic_api_key: str
+    openai_api_key: str = ""
+    
+    # Vector Database (Optional for Phase 1)
+    pinecone_api_key: str = ""
+    pinecone_environment: str = ""
+    pinecone_index_name: str = ""
+    
+    # Security
+    secret_key: str
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    
+    # Logging
+    log_level: str = "INFO"
+    log_format: Literal["json", "text"] = "json"
+    
+    # Rate Limiting
+    rate_limit_per_minute: int = 60
+    
+    # LLM Configuration
+    default_llm_model: str = "claude-sonnet-4-20250514"
+    default_max_tokens: int = 4096
+    default_temperature: float = 0.7
+    
+    # Monitoring
+    langsmith_api_key: str = ""
+    langsmith_project: str = "personx-ai"
+    sentry_dsn: str = ""
+    
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def assemble_db_url(cls, v: str | None, info) -> str:
+        """Construct database URL if not explicitly provided."""
+        if v:
+            return v
+        
+        values = info.data
+        return (
+            f"postgresql+asyncpg://{values.get('postgres_user')}:"
+            f"{values.get('postgres_password')}@"
+            f"{values.get('postgres_host')}:{values.get('postgres_port')}/"
+            f"{values.get('postgres_db')}"
+        )
+    
+    @property
+    def redis_url(self) -> str:
+        """Construct Redis URL."""
+        if self.redis_password:
+            return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production."""
+        return self.environment == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development."""
+        return self.environment == "development"
 
-settings = Settings()
+
+@lru_cache
+def get_settings() -> Settings:
+    """
+    Get cached settings instance.
+    Use this function throughout the application to access settings.
+    """
+    return Settings()
