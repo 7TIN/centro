@@ -1,0 +1,55 @@
+[project]
+name = "centro"
+version = "0.1.0"
+description = "AI personality and assistant"
+requires-python = ">=3.10"
+
+dependencies = [
+  # FastAPI stack
+  "fastapi>=0.109.0",
+  "uvicorn[standard]>=0.27.0",
+  "pydantic>=2.6.0",
+  "pydantic-settings>=2.1.0",
+  "python-dotenv>=1.0.0",
+
+  # LangChain / LangGraph
+  "langgraph>=0.0.20",
+  "langchain>=0.1.0",
+  "langchain-openai>=0.0.5",
+  "langchain-anthropic>=0.1.0",
+  "langchain-community>=0.0.20",
+
+  # Vector DB
+  "pinecone-client>=3.0.0",
+
+  # Storage / infra
+  "sqlalchemy>=2.0.25",
+  "alembic>=1.13.0",
+  "psycopg2-binary>=2.9.9",
+  "redis>=5.0.1",
+
+  # Token utils
+  "tiktoken>=0.5.2",
+
+  # Utilities
+  "python-multipart>=0.0.6",
+  "httpx>=0.26.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=7.4.4",
+  "pytest-asyncio>=0.23.3",
+  "httpx>=0.26.0",
+  "pytest-cov>=4.1.0",
+  "ruff>=0.1.14",
+  "mypy>=1.8.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
