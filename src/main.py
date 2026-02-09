@@ -1,9 +1,9 @@
 """
 Main FastAPI application.
 """
-import logging
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,14 +18,12 @@ from src.core.exceptions import (
     AuthorizationError,
     RateLimitError,
 )
+from src.core.logging import configure_logging
 from src.models.schemas import HealthResponse, ErrorResponse
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+configure_logging()
+logger = structlog.get_logger(__name__)
 
 # Get settings
 settings = get_settings()
