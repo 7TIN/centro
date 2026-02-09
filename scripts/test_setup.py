@@ -20,13 +20,13 @@ async def test_database_connection():
         
         is_healthy = await check_db_connection()
         if is_healthy:
-            print("✅ Database connection successful")
+            print("Database connection successful")
             return True
         else:
-            print("❌ Database connection failed")
+            print("Database connection failed")
             return False
     except Exception as e:
-        print(f"❌ Database connection error: {e}")
+        print(f"Database connection error: {e}")
         return False
 
 
@@ -37,14 +37,15 @@ async def test_settings():
         from config.settings import get_settings
         
         settings = get_settings()
-        print(f"✅ Settings loaded successfully")
+        print(f"Settings loaded successfully")
         print(f"   - Environment: {settings.environment}")
         print(f"   - Debug: {settings.debug}")
         print(f"   - Database URL: {settings.database_url[:30]}...")
-        print(f"   - Anthropic API Key: {'Set' if settings.anthropic_api_key else 'Not Set'}")
+        print(f"   - Ollama Base URL: {settings.ollama_base_url}")
+        print(f"   - Default LLM Model: {settings.default_llm_model}")
         return True
     except Exception as e:
-        print(f"❌ Settings error: {e}")
+        print(f"Settings error: {e}")
         return False
 
 
@@ -60,12 +61,12 @@ async def test_models():
             HealthResponse
         )
         
-        print("✅ All models imported successfully")
+        print("All models imported successfully")
         print(f"   - Database models: User, Person, KnowledgeEntry, Conversation, Message")
         print(f"   - Schema models: PersonCreate, KnowledgeEntryCreate, ChatRequest, HealthResponse")
         return True
     except Exception as e:
-        print(f"❌ Model import error: {e}")
+        print(f"Model import error: {e}")
         return False
 
 
@@ -94,17 +95,17 @@ async def test_table_creation():
                 tables.remove('alembic_version')
             
             if set(expected_tables) == set(tables):
-                print("✅ All expected tables exist")
+                print("All expected tables exist")
                 for table in sorted(tables):
                     print(f"   - {table}")
                 return True
             else:
-                print(f"❌ Table mismatch")
+                print(f"Table mismatch")
                 print(f"   Expected: {sorted(expected_tables)}")
                 print(f"   Found: {sorted(tables)}")
                 return False
     except Exception as e:
-        print(f"❌ Table check error: {e}")
+        print(f"Table check error: {e}")
         return False
 
 
@@ -139,14 +140,14 @@ async def main():
     print(f"Tests passed: {passed}/{total}")
     
     if passed == total:
-        print("\n🎉 All tests passed! Step 1 setup is complete.")
+        print("\nAll tests passed! Step 1 setup is complete.")
         print("\nNext steps:")
         print("1. Start the API: uv run uvicorn src.main:app --reload")
         print("2. Test health endpoint: curl http://localhost:8000/health")
         print("3. View API docs: http://localhost:8000/docs")
         return 0
     else:
-        print("\n⚠️  Some tests failed. Please check the errors above.")
+        print("\nSome tests failed. Please check the errors above.")
         print("\nCommon fixes:")
         print("- Make sure Docker is running: docker-compose ps")
         print("- Run migrations: uv run alembic upgrade head")

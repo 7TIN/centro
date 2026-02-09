@@ -1,8 +1,9 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Annotated
-from langchain_anthropic import ChatAnthropic
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage
 import operator
+from config.settings import get_settings
 
 # Define state
 class AgentState(TypedDict):
@@ -15,8 +16,9 @@ class AgentState(TypedDict):
     final_response: str
     metadata: dict
 
-# Initialize LLM
-llm = ChatAnthropic(model="claude-sonnet-4-20250514")
+# Initialize LLM (local Ollama)
+settings = get_settings()
+llm = ChatOllama(model=settings.default_llm_model, base_url=settings.ollama_base_url)
 
 # Agent functions
 def analyze_context(state: AgentState) -> AgentState:

@@ -71,9 +71,8 @@ class Settings(BaseSettings):
     redis_password: str = ""
     redis_db: int = 0
     
-    # LLM API Keys
-    anthropic_api_key: str
-    openai_api_key: str = ""
+    # LLM (Local / Free)
+    ollama_base_url: str = "http://localhost:11434"
     
     # Vector Database (Optional for Phase 1)
     pinecone_api_key: str = ""
@@ -93,9 +92,13 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     
     # LLM Configuration
-    default_llm_model: str = "claude-sonnet-4-20250514"
+    default_llm_model: str = "llama3.1:8b"
     default_max_tokens: int = 4096
     default_temperature: float = 0.7
+
+    # Embeddings (Local / Free)
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_dimensions: int = 384
     
     # Monitoring
     langsmith_api_key: str = ""

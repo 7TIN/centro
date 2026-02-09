@@ -1,26 +1,27 @@
 from pinecone import Pinecone, ServerlessSpec
-from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
-from config.settings import settings
+from config.settings import get_settings
 
 class VectorStoreService:
     def __init__(self):
+        settings = get_settings()
         # Initialize Pinecone
         pc = Pinecone(api_key=settings.pinecone_api_key)
         
         # Create index if doesn't exist
-        index_name = settings.pinecone_index
+        index_name = settings.pinecone_index_name
         if index_name not in pc.list_indexes().names():
             pc.create_index(
                 name=index_name,
-                dimension=1536,  # text-embedding-3-small
+                dimension=settings.embedding_dimensions,
                 metric="cosine",
                 spec=ServerlessSpec(cloud="aws", region="us-east-1")
             )
         
         # Initialize embeddings
-        self.embeddings = OpenAIEmbeddings(
-            model=settings.embedding_model
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name=settings.embedding_model
         )
         
         # Initialize vector store
