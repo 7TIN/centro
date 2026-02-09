@@ -57,30 +57,32 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     
-    # Database
-    postgres_user: str
-    postgres_password: str
+    # Database (optional for simple mode)
+    postgres_user: str = ""
+    postgres_password: str = ""
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    postgres_db: str
+    postgres_db: str = ""
     database_url: str | None = None
     
-    # Redis
+    # Redis (optional for simple mode)
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_password: str = ""
     redis_db: int = 0
     
-    # LLM (Local / Free)
-    ollama_base_url: str = "http://localhost:11434"
+    # Gemini (simple mode)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-1.5-flash"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com"
     
     # Vector Database (Optional for Phase 1)
     pinecone_api_key: str = ""
     pinecone_environment: str = ""
     pinecone_index_name: str = ""
     
-    # Security
-    secret_key: str
+    # Security (optional for simple mode)
+    secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
@@ -92,8 +94,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     
     # LLM Configuration
-    default_llm_model: str = "llama3.1:8b"
-    default_max_tokens: int = 4096
+    default_max_tokens: int = 1024
     default_temperature: float = 0.7
 
     # Embeddings (Local / Free)
@@ -111,8 +112,9 @@ class Settings(BaseSettings):
         """Construct database URL if not explicitly provided."""
         if v:
             return v
-        
         values = info.data
+        if not values.get("postgres_user") or not values.get("postgres_db"):
+            return ""
         return (
             f"postgresql+asyncpg://{values.get('postgres_user')}:"
             f"{values.get('postgres_password')}@"

@@ -2,6 +2,7 @@
 Main FastAPI application.
 """
 from contextlib import asynccontextmanager
+import uuid
 
 import structlog
 from fastapi import FastAPI, Request, status
@@ -9,7 +10,6 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import get_settings
-from src.core.database import init_db, close_db, check_db_connection
 from src.core.exceptions import (
     PersonXException,
     NotFoundError,
@@ -19,7 +19,9 @@ from src.core.exceptions import (
     RateLimitError,
 )
 from src.core.logging import configure_logging
-from src.models.schemas import HealthResponse, ErrorResponse
+from src.models.schemas import HealthResponse, ErrorResponse, ChatRequest, ChatResponse
+from src.services.prompt_builder import build_prompt
+from src.services.gemini_client import generate_text
 
 # Configure structured logging
 configure_logging()
@@ -37,18 +39,12 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"Starting {settings.app_name} in {settings.environment} mode")
     
-    # Initialize database (only in development)
-    if settings.is_development:
-        logger.info("Initializing database tables...")
-        await init_db()
-    
     logger.info("Application startup complete")
     
     yield
     
     # Shutdown
     logger.info("Shutting down application...")
-    await close_db()
     logger.info("Application shutdown complete")
 
 
@@ -188,13 +184,37 @@ async def health_check():
     Health check endpoint.
     Returns the status of the application and its dependencies.
     """
-    db_healthy = await check_db_connection()
-    
     return HealthResponse(
-        status="healthy" if db_healthy else "unhealthy",
+        status="healthy",
         environment=settings.environment,
         version=settings.api_version,
-        database=db_healthy,
+        database=False,
+    )
+
+
+@app.post("/v1/chat", response_model=ChatResponse, tags=["Chat"])
+async def chat(request: ChatRequest):
+    """
+    Simple Gemini-only chat endpoint.
+    No database or authentication required.
+    """
+    prompt = build_prompt(
+        user_message=request.message,
+        system_prompt=request.system_prompt,
+        person_identity=request.person_identity,
+        knowledge_text=request.knowledge_text,
+        knowledge_files=request.knowledge_files,
+    )
+
+    response_text = await generate_text(prompt)
+
+    return ChatResponse(
+        response=response_text,
+        conversation_id=request.conversation_id or str(uuid.uuid4()),
+        message_id=str(uuid.uuid4()),
+        metadata={
+            "model": settings.gemini_model,
+        },
     )
 
 

@@ -218,6 +218,22 @@ class ChatRequest(BaseModel):
         None,
         description="Existing conversation ID (create new if not provided)"
     )
+    system_prompt: Optional[str] = Field(
+        None,
+        description="Optional system prompt override"
+    )
+    person_identity: Optional[str] = Field(
+        None,
+        description="Optional person identity prompt"
+    )
+    knowledge_text: Optional[str] = Field(
+        None,
+        description="Optional knowledge context as raw text"
+    )
+    knowledge_files: Optional[list[str]] = Field(
+        None,
+        description="Optional list of local file paths to include as knowledge"
+    )
     
     @field_validator("message")
     @classmethod
