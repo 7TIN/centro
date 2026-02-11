@@ -4,7 +4,7 @@ Pydantic schemas for API request/response validation.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============================================================================
@@ -26,7 +26,7 @@ class HealthResponse(BaseModel):
 
 class UserBase(BaseModel):
     """Base user schema."""
-    email: EmailStr
+    email: str = Field(..., max_length=255)
     username: str = Field(..., min_length=3, max_length=100)
     full_name: Optional[str] = Field(None, max_length=255)
 

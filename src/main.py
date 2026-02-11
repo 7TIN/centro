@@ -2,9 +2,9 @@
 Main FastAPI application.
 """
 from contextlib import asynccontextmanager
+import logging
 import uuid
 
-import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,14 +18,16 @@ from src.core.exceptions import (
     AuthorizationError,
     RateLimitError,
 )
-from src.core.logging import configure_logging
 from src.models.schemas import HealthResponse, ErrorResponse, ChatRequest, ChatResponse
 from src.services.prompt_builder import build_prompt
 from src.services.gemini_client import generate_text
 
-# Configure structured logging
-configure_logging()
-logger = structlog.get_logger(__name__)
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Get settings
 settings = get_settings()
@@ -80,7 +82,7 @@ async def not_found_handler(request: Request, exc: NotFoundError):
             error="not_found",
             message=exc.message,
             details=exc.details,
-        ).model_dump(),
+        ).model_dump(mode="json"),
     )
 
 
@@ -93,7 +95,7 @@ async def validation_error_handler(request: Request, exc: ValidationError):
             error="validation_error",
             message=exc.message,
             details=exc.details,
-        ).model_dump(),
+        ).model_dump(mode="json"),
     )
 
 
@@ -106,7 +108,7 @@ async def authentication_error_handler(request: Request, exc: AuthenticationErro
             error="authentication_error",
             message=exc.message,
             details=exc.details,
-        ).model_dump(),
+        ).model_dump(mode="json"),
     )
 
 
@@ -119,7 +121,7 @@ async def authorization_error_handler(request: Request, exc: AuthorizationError)
             error="authorization_error",
             message=exc.message,
             details=exc.details,
-        ).model_dump(),
+        ).model_dump(mode="json"),
     )
 
 
@@ -132,7 +134,7 @@ async def rate_limit_error_handler(request: Request, exc: RateLimitError):
             error="rate_limit_error",
             message=exc.message,
             details=exc.details,
-        ).model_dump(),
+        ).model_dump(mode="json"),
     )
 
 
@@ -145,7 +147,7 @@ async def personx_exception_handler(request: Request, exc: PersonXException):
             error="internal_error",
             message=exc.message,
             details=exc.details,
-        ).model_dump(),
+        ).model_dump(mode="json"),
     )
 
 
@@ -159,7 +161,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             error="internal_error",
             message="An unexpected error occurred",
             details={"error": str(exc)} if settings.debug else {},
-        ).model_dump(),
+        ).model_dump(mode="json"),
     )
 
 

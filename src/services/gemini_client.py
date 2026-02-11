@@ -13,7 +13,11 @@ async def generate_text(prompt: str) -> str:
     if not settings.gemini_api_key:
         raise ConfigurationError("GEMINI_API_KEY is not set")
 
-    url = f"{settings.gemini_base_url}/v1beta/models/{settings.gemini_model}:generateContent"
+    model = settings.gemini_model.strip()
+    if model.startswith("models/"):
+        model = model.split("/", 1)[1]
+
+    url = f"{settings.gemini_base_url}/v1beta/models/{model}:generateContent"
     params = {"key": settings.gemini_api_key}
     payload = {
         "contents": [
