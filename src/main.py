@@ -17,10 +17,22 @@ from src.core.exceptions import (
     AuthenticationError,
     AuthorizationError,
     RateLimitError,
+    ConfigurationError,
 )
-from src.models.schemas import HealthResponse, ErrorResponse, ChatRequest, ChatResponse
-from src.services.prompt_builder import build_prompt
+from src.models.schemas import (
+    HealthResponse,
+    ErrorResponse,
+    ChatRequest,
+    ChatResponse,
+    RetrievalIndexRequest,
+    RetrievalIndexResponse,
+    RetrievalSearchRequest,
+    RetrievalSearchResponse,
+    RetrievedDocument,
+)
+from src.services.prompt_builder import build_prompt, collect_knowledge_inputs
 from src.services.gemini_client import generate_text
+from src.services.vector_store import VectorStoreService
 
 # Configure basic logging
 logging.basicConfig(
@@ -31,6 +43,15 @@ logger = logging.getLogger(__name__)
 
 # Get settings
 settings = get_settings()
+_vector_store_service: VectorStoreService | None = None
+
+
+def get_vector_store_service() -> VectorStoreService:
+    """Lazily initialize vector store only when retrieval is requested."""
+    global _vector_store_service
+    if _vector_store_service is None:
+        _vector_store_service = VectorStoreService()
+    return _vector_store_service
 
 
 @asynccontextmanager
@@ -200,12 +221,29 @@ async def chat(request: ChatRequest):
     Simple Gemini-only chat endpoint.
     No database or authentication required.
     """
+    retrieved_docs = []
+    if request.use_retrieval:
+        top_k = request.retrieval_top_k or settings.retrieval_top_k
+        try:
+            retrieved_docs = get_vector_store_service().search(
+                person_id=request.person_id,
+                query=request.message,
+                top_k=top_k,
+                min_score=settings.retrieval_score_threshold,
+            )
+        except ConfigurationError as exc:
+            raise ValidationError(
+                message="Retrieval requested but vector store is not configured",
+                details={"error": exc.message},
+            ) from exc
+
     prompt = build_prompt(
         user_message=request.message,
         system_prompt=request.system_prompt,
         person_identity=request.person_identity,
         knowledge_text=request.knowledge_text,
         knowledge_files=request.knowledge_files,
+        retrieved_context=retrieved_docs,
     )
 
     response_text = await generate_text(prompt)
@@ -216,7 +254,85 @@ async def chat(request: ChatRequest):
         message_id=str(uuid.uuid4()),
         metadata={
             "model": settings.gemini_model,
+            "retrieval_used": request.use_retrieval,
+            "retrieved_chunks": len(retrieved_docs),
+            "retrieval_sources": [
+                doc.get("source")
+                for doc in retrieved_docs
+                if doc.get("source")
+            ],
         },
+    )
+
+
+@app.post("/v1/retrieval/index", response_model=RetrievalIndexResponse, tags=["Retrieval"])
+async def retrieval_index(request: RetrievalIndexRequest):
+    """
+    Index knowledge text/files into Pinecone for a given person.
+    """
+    documents = collect_knowledge_inputs(
+        knowledge_text=request.knowledge_text,
+        knowledge_files=request.knowledge_files,
+    )
+
+    if not documents:
+        raise ValidationError(
+            message="No knowledge content available for indexing",
+            details={"person_id": request.person_id},
+        )
+
+    try:
+        indexed_chunks = get_vector_store_service().upsert_documents(
+            person_id=request.person_id,
+            documents=documents,
+            source=request.source,
+        )
+    except ConfigurationError as exc:
+        raise ValidationError(
+            message="Retrieval indexing requested but vector store is not configured",
+            details={"error": exc.message},
+        ) from exc
+
+    return RetrievalIndexResponse(
+        person_id=request.person_id,
+        indexed_chunks=indexed_chunks,
+        source=request.source,
+    )
+
+
+@app.post("/v1/retrieval/search", response_model=RetrievalSearchResponse, tags=["Retrieval"])
+async def retrieval_search(request: RetrievalSearchRequest):
+    """
+    Search person-scoped knowledge from Pinecone.
+    """
+    try:
+        matches = get_vector_store_service().search(
+            person_id=request.person_id,
+            query=request.query,
+            top_k=request.top_k,
+            min_score=request.min_score,
+        )
+    except ConfigurationError as exc:
+        raise ValidationError(
+            message="Retrieval search requested but vector store is not configured",
+            details={"error": exc.message},
+        ) from exc
+
+    results = [
+        RetrievedDocument(
+            id=match.get("id", ""),
+            score=float(match.get("score", 0.0)),
+            source=match.get("source"),
+            content=match.get("text", ""),
+            metadata=match.get("metadata", {}),
+        )
+        for match in matches
+    ]
+
+    return RetrievalSearchResponse(
+        person_id=request.person_id,
+        query=request.query,
+        results=results,
     )
 
 

@@ -4,7 +4,7 @@ Pydantic schemas for API request/response validation.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ============================================================================
@@ -234,6 +234,16 @@ class ChatRequest(BaseModel):
         None,
         description="Optional list of local file paths to include as knowledge"
     )
+    use_retrieval: bool = Field(
+        False,
+        description="Whether to use Pinecone retrieval for this chat request"
+    )
+    retrieval_top_k: Optional[int] = Field(
+        None,
+        ge=1,
+        le=20,
+        description="Optional top-k override for retrieval results"
+    )
     
     @field_validator("message")
     @classmethod
@@ -253,6 +263,66 @@ class ChatResponse(BaseModel):
         default_factory=dict,
         description="Metadata (model used, confidence, etc.)"
     )
+
+
+# ============================================================================
+# Retrieval Schemas
+# ============================================================================
+
+class RetrievalIndexRequest(BaseModel):
+    """Schema for indexing knowledge into the vector store."""
+    person_id: str = Field(..., description="ID of the person to index knowledge for")
+    source: str = Field("manual", description="Source label for indexed content")
+    knowledge_text: Optional[str] = Field(
+        None,
+        description="Optional inline knowledge text to index"
+    )
+    knowledge_files: Optional[list[str]] = Field(
+        None,
+        description="Optional list of local files to index"
+    )
+
+    @model_validator(mode="after")
+    def validate_content_present(self):
+        if not (self.knowledge_text and self.knowledge_text.strip()) and not self.knowledge_files:
+            raise ValueError("Provide knowledge_text or knowledge_files for indexing")
+        return self
+
+
+class RetrievalIndexResponse(BaseModel):
+    """Schema for retrieval indexing response."""
+    person_id: str = Field(..., description="Person ID")
+    indexed_chunks: int = Field(..., description="Number of chunks indexed")
+    source: str = Field(..., description="Source label used for indexing")
+
+
+class RetrievalSearchRequest(BaseModel):
+    """Schema for retrieval search requests."""
+    person_id: str = Field(..., description="ID of the person to search for")
+    query: str = Field(..., min_length=1, description="Search query")
+    top_k: int = Field(5, ge=1, le=20, description="Maximum number of matches")
+    min_score: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score threshold"
+    )
+
+
+class RetrievedDocument(BaseModel):
+    """Schema for an individual retrieval match."""
+    id: str = Field(..., description="Vector ID")
+    score: float = Field(..., description="Similarity score")
+    source: Optional[str] = Field(None, description="Source label")
+    content: str = Field(..., description="Matched text content")
+    metadata: dict = Field(default_factory=dict, description="Additional metadata")
+
+
+class RetrievalSearchResponse(BaseModel):
+    """Schema for retrieval search responses."""
+    person_id: str = Field(..., description="Person ID")
+    query: str = Field(..., description="Search query")
+    results: list[RetrievedDocument] = Field(default_factory=list)
 
 
 # ============================================================================

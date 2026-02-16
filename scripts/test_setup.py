@@ -41,8 +41,8 @@ async def test_settings():
         print(f"   - Environment: {settings.environment}")
         print(f"   - Debug: {settings.debug}")
         print(f"   - Database URL: {settings.database_url[:30]}...")
-        print(f"   - Ollama Base URL: {settings.ollama_base_url}")
-        print(f"   - Default LLM Model: {settings.default_llm_model}")
+        print(f"   - Gemini Model: {settings.gemini_model}")
+        print(f"   - Pinecone Index: {settings.pinecone_index_name or 'not configured'}")
         return True
     except Exception as e:
         print(f"Settings error: {e}")

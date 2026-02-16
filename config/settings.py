@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # Embeddings (Local / Free)
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dimensions: int = 384
+    retrieval_top_k: int = 5
+    retrieval_score_threshold: float = 0.2
+    retrieval_chunk_size: int = 1000
+    retrieval_chunk_overlap: int = 200
     
     # Monitoring
     langsmith_api_key: str = ""
