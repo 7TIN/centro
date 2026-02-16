@@ -13,6 +13,20 @@ IMPORTANT RULES:
 Confirm you understand this role by saying: "Ready to learn about X. Please provide their profile."
 """
 
+PERSONA_SYSTEM_PROMPT_TEMPLATE = """{base_prompt}
+
+Person Profile:
+- Name: {name}
+- Role: {role}
+- Team: {team}
+- Communication Style: {communication_style}
+
+Instruction:
+- Use only the provided profile and knowledge context.
+- If context is missing, explicitly say context is insufficient.
+- Do not invent information.
+"""
+
 CONTEXT_ANALYZER_PROMPT = """You are a context analysis agent. Your job is to analyze user questions and extract:
 
 1. **Intent**: What is the user trying to accomplish?

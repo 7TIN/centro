@@ -1,10 +1,15 @@
 """
 Pydantic schemas for API request/response validation.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def utc_now() -> datetime:
+    """Return timezone-aware UTC timestamp for schema defaults."""
+    return datetime.now(timezone.utc)
 
 
 # ============================================================================
@@ -17,7 +22,7 @@ class HealthResponse(BaseModel):
     environment: str = Field(..., description="Environment (dev/staging/prod)")
     version: str = Field(..., description="API version")
     database: bool = Field(..., description="Database connection status")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
 
 
 # ============================================================================
@@ -44,8 +49,7 @@ class UserResponse(UserBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -89,12 +93,14 @@ class PersonResponse(PersonBase):
     base_system_prompt: Optional[str]
     communication_style: Optional[dict]
     is_active: bool
-    metadata: Optional[dict]
+    metadata: Optional[dict] = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata", "profile_metadata"),
+    )
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -140,12 +146,14 @@ class KnowledgeEntryResponse(KnowledgeEntryBase):
     """Schema for knowledge entry response."""
     id: str
     person_id: str
-    metadata: Optional[dict]
+    metadata: Optional[dict] = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata", "entry_metadata"),
+    )
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -169,12 +177,14 @@ class ConversationResponse(ConversationBase):
     person_id: str
     is_active: bool
     summary: Optional[str]
-    metadata: Optional[dict]
+    metadata: Optional[dict] = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata", "context_metadata"),
+    )
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -199,11 +209,13 @@ class MessageResponse(MessageBase):
     model: Optional[str]
     tokens_used: Optional[int]
     confidence_score: Optional[float]
-    metadata: Optional[dict]
+    metadata: Optional[dict] = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata", "message_metadata"),
+    )
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -315,6 +327,10 @@ class RetrievedDocument(BaseModel):
     score: float = Field(..., description="Similarity score")
     source: Optional[str] = Field(None, description="Source label")
     content: str = Field(..., description="Matched text content")
+    retrieval_mode: Optional[str] = Field(
+        None,
+        description="Retrieval mode used: vector or keyword_fallback",
+    )
     metadata: dict = Field(default_factory=dict, description="Additional metadata")
 
 
@@ -323,6 +339,40 @@ class RetrievalSearchResponse(BaseModel):
     person_id: str = Field(..., description="Person ID")
     query: str = Field(..., description="Search query")
     results: list[RetrievedDocument] = Field(default_factory=list)
+
+
+class RetrievalSourceDeleteRequest(BaseModel):
+    """Delete all indexed chunks for a person/source pair."""
+    person_id: str = Field(..., description="Person ID")
+    source: str = Field(..., min_length=1, description="Source label")
+
+
+class RetrievalSourceReplaceRequest(BaseModel):
+    """Replace all chunks for a person/source pair."""
+    person_id: str = Field(..., description="Person ID")
+    source: str = Field(..., min_length=1, description="Source label")
+    knowledge_text: Optional[str] = Field(
+        None,
+        description="Inline knowledge to index",
+    )
+    knowledge_files: Optional[list[str]] = Field(
+        None,
+        description="Local files to index",
+    )
+
+    @model_validator(mode="after")
+    def validate_content_present(self):
+        if not (self.knowledge_text and self.knowledge_text.strip()) and not self.knowledge_files:
+            raise ValueError("Provide knowledge_text or knowledge_files for source replacement")
+        return self
+
+
+class RetrievalSourceActionResponse(BaseModel):
+    """Response for source delete/replace actions."""
+    person_id: str = Field(..., description="Person ID")
+    source: str = Field(..., description="Source label")
+    deleted_chunks: int = Field(..., description="Deleted chunk count")
+    indexed_chunks: int = Field(0, description="Indexed chunk count for replace operations")
 
 
 # ============================================================================
@@ -334,4 +384,4 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error type")
     message: str = Field(..., description="Error message")
     details: Optional[dict] = Field(None, description="Additional error details")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)

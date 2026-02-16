@@ -3,7 +3,6 @@ Main FastAPI application.
 """
 from contextlib import asynccontextmanager
 import logging
-import uuid
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
@@ -24,15 +23,41 @@ from src.models.schemas import (
     ErrorResponse,
     ChatRequest,
     ChatResponse,
+    PersonCreate,
+    PersonResponse,
+    PersonUpdate,
+    KnowledgeEntryCreate,
+    KnowledgeEntryResponse,
     RetrievalIndexRequest,
     RetrievalIndexResponse,
     RetrievalSearchRequest,
     RetrievalSearchResponse,
     RetrievedDocument,
+    RetrievalSourceDeleteRequest,
+    RetrievalSourceReplaceRequest,
+    RetrievalSourceActionResponse,
 )
-from src.services.prompt_builder import build_prompt, collect_knowledge_inputs
-from src.services.gemini_client import generate_text
+from src.services.prompt_builder import (
+    build_prompt,
+    collect_knowledge_inputs,
+    build_persona_system_prompt,
+)
+from src.services.llm_service import generate_with_retry
 from src.services.vector_store import VectorStoreService
+from src.services.person_service import (
+    create_person,
+    list_persons,
+    get_person,
+    update_person,
+    try_get_person,
+    build_person_identity,
+)
+from src.services.knowledge_service import (
+    add_knowledge_entry,
+    list_knowledge_entries,
+    render_knowledge_context,
+)
+from src.services.conversation_service import ensure_conversation, add_message
 
 # Configure basic logging
 logging.basicConfig(
@@ -215,6 +240,50 @@ async def health_check():
     )
 
 
+@app.post("/v1/persons", response_model=PersonResponse, tags=["Persons"])
+async def create_person_endpoint(request: PersonCreate):
+    """Create a person profile used by MVP persona chat."""
+    return create_person(request)
+
+
+@app.get("/v1/persons", response_model=list[PersonResponse], tags=["Persons"])
+async def list_persons_endpoint():
+    """List person profiles."""
+    return list_persons()
+
+
+@app.get("/v1/persons/{person_id}", response_model=PersonResponse, tags=["Persons"])
+async def get_person_endpoint(person_id: str):
+    """Get a person profile."""
+    return get_person(person_id)
+
+
+@app.patch("/v1/persons/{person_id}", response_model=PersonResponse, tags=["Persons"])
+async def update_person_endpoint(person_id: str, request: PersonUpdate):
+    """Update a person profile."""
+    return update_person(person_id, request)
+
+
+@app.post(
+    "/v1/persons/{person_id}/knowledge",
+    response_model=KnowledgeEntryResponse,
+    tags=["Knowledge"],
+)
+async def add_knowledge_endpoint(person_id: str, request: KnowledgeEntryCreate):
+    """Add knowledge entry for a person profile."""
+    return add_knowledge_entry(person_id, request)
+
+
+@app.get(
+    "/v1/persons/{person_id}/knowledge",
+    response_model=list[KnowledgeEntryResponse],
+    tags=["Knowledge"],
+)
+async def list_knowledge_endpoint(person_id: str):
+    """List knowledge entries for a person profile."""
+    return list_knowledge_entries(person_id)
+
+
 @app.post("/v1/chat", response_model=ChatResponse, tags=["Chat"])
 async def chat(request: ChatRequest):
     """
@@ -230,6 +299,7 @@ async def chat(request: ChatRequest):
                 query=request.message,
                 top_k=top_k,
                 min_score=settings.retrieval_score_threshold,
+                enable_hybrid_fallback=True,
             )
         except ConfigurationError as exc:
             raise ValidationError(
@@ -237,21 +307,73 @@ async def chat(request: ChatRequest):
                 details={"error": exc.message},
             ) from exc
 
-    prompt = build_prompt(
-        user_message=request.message,
-        system_prompt=request.system_prompt,
-        person_identity=request.person_identity,
+    person = try_get_person(request.person_id)
+    resolved_system_prompt = request.system_prompt
+    resolved_person_identity = request.person_identity
+
+    auto_knowledge_context = ""
+    knowledge_count = 0
+    if person:
+        if not resolved_system_prompt:
+            resolved_system_prompt = build_persona_system_prompt(
+                base_prompt=person.base_system_prompt,
+                name=person.name,
+                role=person.role,
+                team=person.department,
+                communication_style=person.communication_style,
+            )
+        if not resolved_person_identity:
+            resolved_person_identity = build_person_identity(person)
+
+        person_knowledge = list_knowledge_entries(request.person_id)
+        knowledge_count = len(person_knowledge)
+        auto_knowledge_context = render_knowledge_context(request.person_id, max_entries=10)
+
+    inline_knowledge_inputs = collect_knowledge_inputs(
         knowledge_text=request.knowledge_text,
         knowledge_files=request.knowledge_files,
+    )
+    if auto_knowledge_context:
+        inline_knowledge_inputs.insert(0, auto_knowledge_context)
+    merged_knowledge_text = "\n\n".join(inline_knowledge_inputs).strip() if inline_knowledge_inputs else None
+
+    prompt = build_prompt(
+        user_message=request.message,
+        system_prompt=resolved_system_prompt,
+        person_identity=resolved_person_identity,
+        knowledge_text=merged_knowledge_text,
+        knowledge_files=None,
         retrieved_context=retrieved_docs,
     )
 
-    response_text = await generate_text(prompt)
+    response_text = await generate_with_retry(prompt)
+
+    conversation = ensure_conversation(
+        person_id=request.person_id,
+        conversation_id=request.conversation_id,
+    )
+    add_message(
+        conversation_id=conversation.id,
+        role="user",
+        content=request.message,
+    )
+    assistant_message = add_message(
+        conversation_id=conversation.id,
+        role="assistant",
+        content=response_text,
+        model=settings.gemini_model,
+        metadata={
+            "retrieval_used": request.use_retrieval,
+            "retrieved_chunks": len(retrieved_docs),
+            "person_found": person is not None,
+            "knowledge_entries_used": knowledge_count,
+        },
+    )
 
     return ChatResponse(
         response=response_text,
-        conversation_id=request.conversation_id or str(uuid.uuid4()),
-        message_id=str(uuid.uuid4()),
+        conversation_id=conversation.id,
+        message_id=assistant_message.id,
         metadata={
             "model": settings.gemini_model,
             "retrieval_used": request.use_retrieval,
@@ -261,6 +383,8 @@ async def chat(request: ChatRequest):
                 for doc in retrieved_docs
                 if doc.get("source")
             ],
+            "person_found": person is not None,
+            "knowledge_entries_used": knowledge_count,
         },
     )
 
@@ -311,6 +435,7 @@ async def retrieval_search(request: RetrievalSearchRequest):
             query=request.query,
             top_k=request.top_k,
             min_score=request.min_score,
+            enable_hybrid_fallback=True,
         )
     except ConfigurationError as exc:
         raise ValidationError(
@@ -324,6 +449,7 @@ async def retrieval_search(request: RetrievalSearchRequest):
             score=float(match.get("score", 0.0)),
             source=match.get("source"),
             content=match.get("text", ""),
+            retrieval_mode=match.get("retrieval_mode"),
             metadata=match.get("metadata", {}),
         )
         for match in matches
@@ -333,6 +459,68 @@ async def retrieval_search(request: RetrievalSearchRequest):
         person_id=request.person_id,
         query=request.query,
         results=results,
+    )
+
+
+@app.post(
+    "/v1/retrieval/source/delete",
+    response_model=RetrievalSourceActionResponse,
+    tags=["Retrieval"],
+)
+async def retrieval_delete_source(request: RetrievalSourceDeleteRequest):
+    """
+    Delete all indexed chunks for a person/source pair.
+    """
+    try:
+        deleted = get_vector_store_service().delete_by_source(
+            person_id=request.person_id,
+            source=request.source,
+        )
+    except ConfigurationError as exc:
+        raise ValidationError(
+            message="Retrieval delete requested but vector store is not configured",
+            details={"error": exc.message},
+        ) from exc
+
+    return RetrievalSourceActionResponse(
+        person_id=request.person_id,
+        source=request.source,
+        deleted_chunks=deleted,
+        indexed_chunks=0,
+    )
+
+
+@app.post(
+    "/v1/retrieval/source/replace",
+    response_model=RetrievalSourceActionResponse,
+    tags=["Retrieval"],
+)
+async def retrieval_replace_source(request: RetrievalSourceReplaceRequest):
+    """
+    Replace all indexed chunks for a person/source pair.
+    """
+    documents = collect_knowledge_inputs(
+        knowledge_text=request.knowledge_text,
+        knowledge_files=request.knowledge_files,
+    )
+
+    try:
+        deleted, indexed = get_vector_store_service().replace_source_documents(
+            person_id=request.person_id,
+            source=request.source,
+            documents=documents,
+        )
+    except ConfigurationError as exc:
+        raise ValidationError(
+            message="Retrieval replace requested but vector store is not configured",
+            details={"error": exc.message},
+        ) from exc
+
+    return RetrievalSourceActionResponse(
+        person_id=request.person_id,
+        source=request.source,
+        deleted_chunks=deleted,
+        indexed_chunks=indexed,
     )
 
 

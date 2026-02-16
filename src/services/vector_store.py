@@ -52,6 +52,10 @@ class VectorStoreService:
             chunk_overlap=settings.retrieval_chunk_overlap,
         )
 
+        # Local caches used for hybrid fallback and source lifecycle operations.
+        self._keyword_cache: dict[str, list[dict[str, Any]]] = {}
+        self._source_vector_ids: dict[tuple[str, str], set[str]] = {}
+
     def _ensure_index(self) -> None:
         existing_indexes = set(self._client.list_indexes().names())
         if self._index_name in existing_indexes:
@@ -107,9 +111,10 @@ class VectorStoreService:
 
         payload: list[dict[str, Any]] = []
         for index, (chunk, vector) in enumerate(zip(chunks, vectors), start=1):
+            vector_id = str(uuid4())
             payload.append(
                 {
-                    "id": str(uuid4()),
+                    "id": vector_id,
                     "values": vector,
                     "metadata": {
                         "person_id": person_id,
@@ -123,7 +128,100 @@ class VectorStoreService:
             )
 
         self._index.upsert(vectors=payload)
+
+        key = (person_id, source)
+        self._source_vector_ids.setdefault(key, set()).update(item["id"] for item in payload)
+        cache_entries = self._keyword_cache.setdefault(person_id, [])
+        cache_entries.extend(
+            {
+                "id": item["id"],
+                "source": item["metadata"]["source"],
+                "text": item["metadata"]["text"],
+                "metadata": item["metadata"],
+            }
+            for item in payload
+        )
         return len(payload)
+
+    def delete_by_source(self, person_id: str, source: str) -> int:
+        """Delete all indexed chunks for a person/source pair."""
+        key = (person_id, source)
+        existing_ids = list(self._source_vector_ids.get(key, set()))
+
+        try:
+            self._index.delete(
+                filter={
+                    "person_id": {"$eq": person_id},
+                    "source": {"$eq": source},
+                }
+            )
+        except TypeError:
+            if existing_ids:
+                self._index.delete(ids=existing_ids)
+
+        deleted_count = len(existing_ids)
+        self._source_vector_ids.pop(key, None)
+
+        if person_id in self._keyword_cache:
+            before = len(self._keyword_cache[person_id])
+            self._keyword_cache[person_id] = [
+                item for item in self._keyword_cache[person_id] if item.get("source") != source
+            ]
+            deleted_count = max(deleted_count, before - len(self._keyword_cache[person_id]))
+
+        return deleted_count
+
+    def replace_source_documents(
+        self,
+        person_id: str,
+        source: str,
+        documents: list[str],
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> tuple[int, int]:
+        """Replace all chunks for a person/source with new documents."""
+        deleted = self.delete_by_source(person_id=person_id, source=source)
+        indexed = self.upsert_documents(
+            person_id=person_id,
+            documents=documents,
+            source=source,
+            extra_metadata=extra_metadata,
+        )
+        return deleted, indexed
+
+    def _keyword_search(self, person_id: str, query: str, top_k: int) -> list[dict[str, Any]]:
+        """Fallback lexical retrieval across locally cached chunks."""
+        tokens = {token for token in query.lower().split() if token}
+        if not tokens:
+            return []
+
+        entries = self._keyword_cache.get(person_id, [])
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for item in entries:
+            text = str(item.get("text", "")).lower()
+            if not text:
+                continue
+
+            overlap = sum(1 for token in tokens if token in text)
+            if overlap <= 0:
+                continue
+
+            score = overlap / len(tokens)
+            scored.append((score, item))
+
+        scored.sort(key=lambda entry: entry[0], reverse=True)
+        results: list[dict[str, Any]] = []
+        for score, item in scored[:top_k]:
+            results.append(
+                {
+                    "id": str(item.get("id", "")),
+                    "score": float(score),
+                    "text": str(item.get("text", "")),
+                    "source": item.get("source"),
+                    "metadata": item.get("metadata", {}),
+                    "retrieval_mode": "keyword_fallback",
+                }
+            )
+        return results
 
     def search(
         self,
@@ -131,6 +229,7 @@ class VectorStoreService:
         query: str,
         top_k: int = 5,
         min_score: float = 0.0,
+        enable_hybrid_fallback: bool = True,
     ) -> list[dict[str, Any]]:
         """Run semantic search filtered by person."""
         query_vector = self._embed([query])[0]
@@ -172,7 +271,15 @@ class VectorStoreService:
                     "text": str(metadata.get("text", "")),
                     "source": metadata.get("source"),
                     "metadata": metadata,
+                    "retrieval_mode": "vector",
                 }
             )
 
-        return results
+        if results:
+            results.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+            return results[:top_k]
+
+        if enable_hybrid_fallback:
+            return self._keyword_search(person_id=person_id, query=query, top_k=top_k)
+
+        return []

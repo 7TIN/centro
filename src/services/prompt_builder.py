@@ -5,6 +5,8 @@ Combines system prompt, person identity, knowledge, and user message.
 from pathlib import Path
 from typing import Any
 
+from config.prompts import PERSONA_SYSTEM_PROMPT_TEMPLATE
+
 
 def read_knowledge_files(file_paths: list[str] | None) -> list[str]:
     if not file_paths:
@@ -99,3 +101,20 @@ def build_prompt(
     parts.append(f"User Message:\n{user_message.strip()}")
 
     return "\n\n".join(parts).strip()
+
+
+def build_persona_system_prompt(
+    base_prompt: str | None,
+    name: str,
+    role: str | None = None,
+    team: str | None = None,
+    communication_style: dict[str, Any] | None = None,
+) -> str:
+    """Create a template-based system prompt from person profile fields."""
+    return PERSONA_SYSTEM_PROMPT_TEMPLATE.format(
+        base_prompt=(base_prompt or "").strip() or "You are acting as this teammate's AI proxy.",
+        name=name,
+        role=role or "Unknown",
+        team=team or "Unknown",
+        communication_style=communication_style or {},
+    ).strip()

@@ -1,0 +1,32 @@
+[
+  {
+    "person_id": "eval_person",
+    "source": "deploy_runbook",
+    "documents": [
+      "Blue-green deployments require validating both target groups before traffic cutover.",
+      "Rollback should be triggered if p95 latency increases more than 20 percent."
+    ],
+    "query": "How do we deploy safely?",
+    "expected_terms": ["blue-green", "rollback"]
+  },
+  {
+    "person_id": "eval_person",
+    "source": "database_ops",
+    "documents": [
+      "Start with pg_stat_activity to inspect long-running queries.",
+      "Check IOPS and CPU graphs before changing indexes."
+    ],
+    "query": "What should I check for a slow database?",
+    "expected_terms": ["pg_stat_activity", "IOPS"]
+  },
+  {
+    "person_id": "eval_person",
+    "source": "incident_policy",
+    "documents": [
+      "Prioritize rollback over config edits during active incidents.",
+      "Only attempt partial mitigation after rollback feasibility is evaluated."
+    ],
+    "query": "What is the first incident action?",
+    "expected_terms": ["rollback"]
+  }
+]

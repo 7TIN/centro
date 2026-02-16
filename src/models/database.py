@@ -72,7 +72,7 @@ class Person(Base):
     
     # Metadata
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+    profile_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSON)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -114,7 +114,7 @@ class KnowledgeEntry(Base):
     source_reference: Mapped[Optional[str]] = mapped_column(String(500))  # file path, URL, etc.
     
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+    entry_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSON)
     tags: Mapped[Optional[list]] = mapped_column(JSON)
     
     # Importance/priority
@@ -153,7 +153,7 @@ class Conversation(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+    context_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSON)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -193,7 +193,7 @@ class Message(Base):
     confidence_score: Mapped[Optional[float]] = mapped_column(Float)
     
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+    message_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSON)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     
