@@ -1,6 +1,11 @@
 # Person X Frontend (`web`)
 
-Next.js App Router frontend for backend Phases 1-3.
+Next.js App Router frontend for the Person X AI Assistant.
+
+Development was delivered in phases, but runtime UX is capability-based:
+- Health
+- Persona + Chat
+- Retrieval
 
 ## Stack
 

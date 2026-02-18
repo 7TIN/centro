@@ -1,7 +1,7 @@
 [project]
 name = "centro"
 version = "0.1.0"
-description = "AI personality and assistant"
+description = "Personal AI teammate assistant for person-scoped knowledge and handoff continuity"
 requires-python = ">=3.10"
 
 dependencies = [

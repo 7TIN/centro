@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Person X Frontend Console",
   description:
-    "Frontend console for Person X AI Assistant phases 1-3 (health, persona chat, retrieval).",
+    "Frontend console for the Person X AI Assistant (health, persona chat, retrieval).",
 };
 
 export default function RootLayout({

@@ -1,64 +1,48 @@
-# Centro - PersonX AI Assistant
+# Person X AI Assistant (Core Backend)
 
-AI personality and assistant built with FastAPI, LangGraph, and LangChain.
+FastAPI backend for a personal AI teammate assistant.
 
-## Setup
+## Product Context
 
-1. Clone the repository
-2. Copy .env.example to .env and fill in your settings (no API keys required)
-3. Install dependencies: `uv sync`
-4. Run migrations: `uv run alembic upgrade head`
-5. Start dev server: `uv run uvicorn src.main:app --reload`
+Teams often depend on one high-ownership person (Person X) for unblockers and key decisions.
+When that person is unavailable, teammates still need accurate context to move work forward.
 
-## Project Structure
+This backend powers a personal AI assistant that answers on behalf of that person using curated profile and knowledge context.
 
-- src/ - Main application code
-- config/ - Configuration and settings
-- data/ - Knowledge base and embeddings
-- 	ests/ - Test files
-- scripts/ - Utility scripts
+## What It Handles
 
+- Person profile management
+- Person-scoped knowledge management
+- Persona-aware chat responses
+- Optional retrieval indexing and search
+
+## Tech Stack
+
+- FastAPI
+- Pydantic
+- Gemini model integration
+- Pinecone retrieval (optional)
+
+## Run Locally
+
+```bash
+cp .env.example .env
+uv sync
+uv run python -m uvicorn src.main:app --reload
 ```
-centro
-├─ alembic
-│  └─ versions
-├─ config
-│  ├─ prompts.py
-│  ├─ settings.py
-│  └─ __init__.py
-├─ data
-│  ├─ embeddings
-│  └─ knowledge_base
-├─ docker-compose.yml
-├─ Dockerfile
-├─ pyproject.toml
-├─ README.md
-├─ scripts
-│  ├─ ingest_knowledge.py
-│  └─ __init__.py
-├─ setup_structure.ps1
-├─ src
-│  ├─ agents
-│  │  ├─ orchestrator.py
-│  │  └─ __init__.py
-│  ├─ api
-│  │  └─ v1
-│  │     └─ routes
-│  │        ├─ routes.py
-│  │        └─ __init__.py
-│  ├─ core
-│  │  └─ __init__.py
-│  ├─ models
-│  │  └─ __init__.py
-│  └─ services
-│     ├─ memory.py
-│     ├─ vector_store.py
-│     └─ __init__.py
-├─ tests
-│  ├─ integration
-│  │  └─ __init__.py
-│  └─ unit
-│     └─ __init__.py
-└─ uv.lock
 
-```
+Note: python -m uvicorn is recommended when uv run uvicorn has script-path issues on some Windows setups.
+
+## Repository Layout
+
+- src/ - API routes, services, models
+- config/ - settings and prompt config
+- scripts/ - utility and evaluation scripts
+- tests/ - unit and integration tests
+- docs/ - development-phase documentation and implementation references
+
+## Docs
+
+- docs/PLAN.md
+- docs/IMPLEMENTATION_GUIDE.md
+- docs/README.md

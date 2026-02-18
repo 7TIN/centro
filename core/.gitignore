@@ -62,8 +62,7 @@ data/logs/
 *.sqlite3
 
 # Documentation
-docs/_build/
-docs/
+docs
 
 # uv
 .uv/
