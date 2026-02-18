@@ -98,6 +98,14 @@ def build_prompt(
     if retrieval_block:
         parts.append("Retrieved Context:\n" + retrieval_block)
 
+    parts.append(
+        "Reply Style:\n"
+        "- Respond like a human teammate in natural language.\n"
+        "- Do not include internal reasoning, analysis traces, or policy labels.\n"
+        "- Do not echo section headers from context unless the user asks for structured format.\n"
+        "- If information is missing, say what is missing in plain language and suggest next checks."
+    )
+
     parts.append(f"User Message:\n{user_message.strip()}")
 
     return "\n\n".join(parts).strip()
