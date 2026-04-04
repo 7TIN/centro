@@ -1,6 +1,7 @@
 "use client";
 
-import { ReactNode, useEffect, useRef } from "react";
+import Link from "next/link";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,17 +22,14 @@ export type PersonAiChatMessage = {
 
 type PersonAiChatProps = {
   personName: string;
+  personId: string | null;
   messages: PersonAiChatMessage[];
   chatInput: string;
   chatLoading: boolean;
   chatError: string | null;
-  selectedQuestion: string;
   suggestedQuestions: string[];
-  onNewSetup: () => void;
   onSend: () => void;
   onChatInputChange: (value: string) => void;
-  onSelectedQuestionChange: (value: string) => void;
-  onUseSelectedQuestion: () => void;
   onPickSuggestedQuestion: (value: string) => void;
 };
 
@@ -69,20 +67,24 @@ function renderMessageContent(content: string): ReactNode {
 
 export function PersonAiChat({
   personName,
+  personId,
   messages,
   chatInput,
   chatLoading,
   chatError,
-  selectedQuestion,
   suggestedQuestions,
-  onNewSetup,
   onSend,
   onChatInputChange,
-  onSelectedQuestionChange,
-  onUseSelectedQuestion,
   onPickSuggestedQuestion,
 }: PersonAiChatProps) {
   const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const knowledgeHref = useMemo(() => {
+    if (!personId) {
+      return "/knowledge";
+    }
+    return `/knowledge?personId=${encodeURIComponent(personId)}`;
+  }, [personId]);
 
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({
@@ -91,12 +93,10 @@ export function PersonAiChat({
     });
   }, [messages, chatLoading]);
 
-return (
+  return (
     <main className="flex h-[100dvh] w-full items-center justify-center bg-neutral-50/50 p-4 md:p-6 lg:p-8">
-      <div className="w-full max-w-6xl h-full max-h-[900px]">
+      <div className="h-full max-h-[900px] w-full max-w-6xl">
         <Card className="flex h-full flex-col overflow-hidden shadow-lg border-neutral-200/60 bg-white">
-          
-          {/* --- Header Section --- */}
           <CardHeader className="flex flex-row items-center justify-between border-b bg-white px-6 py-4 shadow-sm z-10">
             <div className="flex flex-col space-y-1.5">
               <CardTitle className="text-xl font-bold tracking-tight text-neutral-900">
@@ -106,23 +106,18 @@ return (
                 Chat with this person AI
               </CardDescription>
             </div>
-            <Button 
-              onClick={onNewSetup} 
-              variant="outline" 
-              size="sm" 
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
               className="rounded-full px-4 shadow-sm hover:bg-neutral-100"
             >
-              New Setup
+              <Link href={knowledgeHref}>Knowledge</Link>
             </Button>
           </CardHeader>
 
-          {/* --- Body Section --- */}
-          <CardContent className="flex flex-1 flex-col lg:flex-row p-0 overflow-hidden bg-neutral-50/30">
-            
-            {/* Main Chat Area */}
+          <CardContent className="flex flex-1 flex-col p-0 overflow-hidden bg-neutral-50/30">
             <section className="flex flex-1 flex-col overflow-hidden relative">
-              
-              {/* Messages Container */}
               <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-thin">
                 {messages.length === 0 ? (
                   <div className="flex h-full items-center justify-center">
@@ -137,19 +132,19 @@ return (
                 {messages.map((message) => {
                   const isAnon = message.sender === "anon";
                   return (
-                    <div 
-                      key={message.id} 
+                    <div
+                      key={message.id}
                       className={`flex w-full ${isAnon ? "justify-end" : "justify-start"}`}
                     >
                       <div className={`flex max-w-[85%] md:max-w-[75%] flex-col gap-1 ${isAnon ? "items-end" : "items-start"}`}>
                         <span className="text-[11px] font-semibold tracking-wide text-neutral-400 px-1 uppercase">
                           {isAnon ? "Anon" : personName}
                         </span>
-                        
-                        <div 
+
+                        <div
                           className={`px-4 py-3 text-[15px] leading-relaxed shadow-sm ${
-                            isAnon 
-                              ? "bg-neutral-900 text-white rounded-2xl rounded-br-sm" 
+                            isAnon
+                              ? "bg-neutral-900 text-white rounded-2xl rounded-br-sm"
                               : "bg-white border border-neutral-200 text-neutral-800 rounded-2xl rounded-bl-sm"
                           }`}
                         >
@@ -159,18 +154,16 @@ return (
                     </div>
                   );
                 })}
-                {/* Scroll Anchor */}
                 <div ref={endOfMessagesRef} className="h-1" />
               </div>
 
-              {/* Input Area */}
               <div className="bg-white border-t border-neutral-200 p-4 md:p-5">
                 {chatError ? (
                   <div className="mb-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600 border border-red-100 flex items-center">
                     <span className="font-medium">Error:</span>&nbsp;{chatError}
                   </div>
                 ) : null}
-                
+
                 <div className="relative flex items-end gap-3 max-w-4xl mx-auto">
                   <Textarea
                     className="min-h-[52px] w-full resize-none rounded-2xl border-neutral-300 bg-neutral-50 px-4 py-3.5 pr-[100px] text-sm focus-visible:ring-1 focus-visible:ring-neutral-400 focus-visible:ring-offset-0 transition-all"
@@ -178,7 +171,7 @@ return (
                     placeholder="Type a message as Anon..."
                     value={chatInput}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         if (!chatLoading && chatInput.trim()) onSend();
                       }
@@ -197,64 +190,60 @@ return (
                 </div>
               </div>
             </section>
-
-            {/* Sidebar / Suggested Questions */}
-            <aside className="w-full lg:w-[320px] bg-neutral-50 border-t lg:border-t-0 lg:border-l border-neutral-200 flex flex-col shrink-0 p-5 z-20">
-              
-              <p className="text-sm font-bold text-neutral-800 mb-4 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-500"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
-                Suggested Questions
-              </p>
-
-              {/* Custom Dropdown (No React state needed) */}
-              <details className="group relative w-full mb-3">
-                <summary className="flex cursor-pointer items-center justify-between w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-700 shadow-sm transition-all hover:bg-neutral-50 list-none [&::-webkit-details-marker]:hidden focus:outline-none focus:ring-2 focus:ring-neutral-900/10">
-                  <span className="truncate pr-2">
-                    {selectedQuestion || "Select a question..."}
-                  </span>
-                  <svg className="h-4 w-4 shrink-0 text-neutral-500 transition-transform duration-200 group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </summary>
-                
-                {/* The Dropdown List Card */}
-                <div className="absolute left-0 right-0 z-50 mt-2 bg-white rounded-md border border-neutral-200 shadow-lg overflow-hidden max-h-[50vh] overflow-y-auto scrollbar-thin">
-                  {suggestedQuestions.map((question, index) => (
-                    <button
-                      key={question}
-                      type="button"
-                      className="w-full px-4 py-3 text-left text-sm text-neutral-600 transition-colors hover:bg-neutral-50 hover:text-neutral-900 border-b border-neutral-100 last:border-0 flex items-start gap-2.5"
-                      onClick={(e) => {
-                        // Update the selected text
-                        onSelectedQuestionChange(question);
-                        // Optional UX touch: automatically closes the <details> tag when clicked
-                        e.currentTarget.closest('details')?.removeAttribute('open');
-                      }}
-                    >
-                      <span className="text-neutral-300 font-medium mt-[1px] text-xs">
-                        {index + 1}.
-                      </span> 
-                      <span className="leading-snug">
-                        {question}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </details>
-
-              <Button
-                className="w-full rounded-md shadow-sm"
-                onClick={onUseSelectedQuestion}
-                variant="secondary"
-              >
-                Use Selected Question
-              </Button>
-
-            </aside>
-
           </CardContent>
         </Card>
       </div>
+
+      {drawerOpen ? (
+        <button
+          aria-label="Close suggested questions"
+          className="fixed inset-0 z-40 bg-black/30"
+          onClick={() => setDrawerOpen(false)}
+          type="button"
+        />
+      ) : null}
+
+      <aside
+        className={`fixed bottom-0 right-0 z-50 w-full max-w-sm rounded-t-2xl border border-neutral-200 bg-white shadow-xl transition-transform duration-200 sm:bottom-4 sm:right-4 sm:rounded-2xl ${
+          drawerOpen ? "translate-y-0" : "translate-y-[110%]"
+        }`}
+      >
+        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+          <h2 className="text-sm font-semibold text-neutral-900">Suggested Questions</h2>
+          <Button
+            className="h-8 rounded-md px-3"
+            onClick={() => setDrawerOpen(false)}
+            size="sm"
+            variant="outline"
+          >
+            Close
+          </Button>
+        </div>
+        <div className="max-h-[60dvh] overflow-y-auto px-2 py-2">
+          {suggestedQuestions.map((question, index) => (
+            <button
+              key={question}
+              className="flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm text-neutral-700 transition hover:bg-neutral-100"
+              onClick={() => {
+                onPickSuggestedQuestion(question);
+                setDrawerOpen(false);
+              }}
+              type="button"
+            >
+              <span className="text-xs text-neutral-400">{index + 1}.</span>
+              <span>{question}</span>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <Button
+        className="fixed bottom-4 right-4 z-50 rounded-full px-4 shadow-lg sm:bottom-6 sm:right-6"
+        onClick={() => setDrawerOpen((prev) => !prev)}
+        type="button"
+      >
+        Questions
+      </Button>
     </main>
   );
 }
