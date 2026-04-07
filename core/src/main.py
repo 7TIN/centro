@@ -27,6 +27,7 @@ from src.models.schemas import (
     PersonResponse,
     PersonUpdate,
     KnowledgeEntryCreate,
+    KnowledgeEntryUpdate,
     KnowledgeEntryResponse,
     RetrievalIndexRequest,
     RetrievalIndexResponse,
@@ -39,6 +40,9 @@ from src.models.schemas import (
     WikiOverviewResponse,
     WikiPageResponse,
     WikiRebuildResponse,
+    TeamWikiOverviewResponse,
+    TeamWikiPageResponse,
+    DemoBootstrapResponse,
 )
 from src.services.prompt_builder import (
     build_prompt,
@@ -58,17 +62,19 @@ from src.services.person_service import (
 from src.services.knowledge_service import (
     add_knowledge_entry,
     list_knowledge_entries,
-    render_knowledge_context,
+    update_knowledge_entry,
 )
 from src.services.conversation_service import ensure_conversation, add_message
+from src.services.demo_seed_service import ensure_demo_seed_data
 from src.services.wiki_service import (
-    initialize_person_wiki,
-    sync_person_profile_page,
-    upsert_knowledge_page,
-    get_wiki_overview,
-    read_wiki_page,
+    get_person_wiki_overview,
+    read_person_wiki_page,
     rebuild_person_wiki,
-    render_wiki_context,
+    get_team_wiki_overview,
+    read_team_wiki_page,
+    render_team_context,
+    render_person_context,
+    sync_team_snapshot_for_person,
 )
 
 # Configure basic logging
@@ -255,9 +261,7 @@ async def health_check():
 @app.post("/v1/persons", response_model=PersonResponse, tags=["Persons"])
 async def create_person_endpoint(request: PersonCreate):
     """Create a person profile used by MVP persona chat."""
-    person = create_person(request)
-    initialize_person_wiki(person)
-    return person
+    return create_person(request)
 
 
 @app.get("/v1/persons", response_model=list[PersonResponse], tags=["Persons"])
@@ -275,9 +279,7 @@ async def get_person_endpoint(person_id: str):
 @app.patch("/v1/persons/{person_id}", response_model=PersonResponse, tags=["Persons"])
 async def update_person_endpoint(person_id: str, request: PersonUpdate):
     """Update a person profile."""
-    person = update_person(person_id, request)
-    sync_person_profile_page(person)
-    return person
+    return update_person(person_id, request)
 
 
 @app.post(
@@ -287,9 +289,7 @@ async def update_person_endpoint(person_id: str, request: PersonUpdate):
 )
 async def add_knowledge_endpoint(person_id: str, request: KnowledgeEntryCreate):
     """Add knowledge entry for a person profile."""
-    entry = add_knowledge_entry(person_id, request)
-    upsert_knowledge_page(person_id, entry)
-    return entry
+    return add_knowledge_entry(person_id, request)
 
 
 @app.get(
@@ -302,6 +302,20 @@ async def list_knowledge_endpoint(person_id: str):
     return list_knowledge_entries(person_id)
 
 
+@app.patch(
+    "/v1/persons/{person_id}/knowledge/{knowledge_id}",
+    response_model=KnowledgeEntryResponse,
+    tags=["Knowledge"],
+)
+async def update_knowledge_endpoint(
+    person_id: str,
+    knowledge_id: str,
+    request: KnowledgeEntryUpdate,
+):
+    """Update knowledge entry for a person profile."""
+    return update_knowledge_entry(person_id=person_id, knowledge_id=knowledge_id, payload=request)
+
+
 @app.get(
     "/v1/persons/{person_id}/wiki",
     response_model=WikiOverviewResponse,
@@ -309,9 +323,8 @@ async def list_knowledge_endpoint(person_id: str):
 )
 async def get_person_wiki_endpoint(person_id: str):
     """Get index, log, and page summaries for a person's persistent wiki."""
-    # Enforce person existence for managed wiki APIs.
     get_person(person_id)
-    return WikiOverviewResponse(**get_wiki_overview(person_id))
+    return WikiOverviewResponse(**get_person_wiki_overview(person_id))
 
 
 @app.get(
@@ -322,7 +335,7 @@ async def get_person_wiki_endpoint(person_id: str):
 async def read_person_wiki_page_endpoint(person_id: str, page_path: str):
     """Read an individual markdown page from the person's wiki."""
     get_person(person_id)
-    return WikiPageResponse(**read_wiki_page(person_id=person_id, page_path=page_path))
+    return WikiPageResponse(**read_person_wiki_page(person_id=person_id, page_path=page_path))
 
 
 @app.post(
@@ -336,6 +349,29 @@ async def rebuild_person_wiki_endpoint(person_id: str):
     entries = list_knowledge_entries(person_id)
     stats = rebuild_person_wiki(person=person, knowledge_entries=entries)
     return WikiRebuildResponse(person_id=person_id, **stats)
+
+
+@app.get("/v1/team/wiki", response_model=TeamWikiOverviewResponse, tags=["Wiki"])
+async def get_team_wiki_endpoint():
+    """Get overview for the shared core team wiki."""
+    return TeamWikiOverviewResponse(**get_team_wiki_overview())
+
+
+@app.get(
+    "/v1/team/wiki/pages/{page_path:path}",
+    response_model=TeamWikiPageResponse,
+    tags=["Wiki"],
+)
+async def read_team_wiki_page_endpoint(page_path: str):
+    """Read an individual markdown page from shared team wiki."""
+    return TeamWikiPageResponse(**read_team_wiki_page(page_path))
+
+
+@app.post("/v1/demo/bootstrap", response_model=DemoBootstrapResponse, tags=["Demo"])
+async def demo_bootstrap_endpoint():
+    """Seed server-side demo team/person markdown data and return selector payload."""
+    payload = ensure_demo_seed_data()
+    return DemoBootstrapResponse(**payload)
 
 
 @app.post("/v1/chat", response_model=ChatResponse, tags=["Chat"])
@@ -365,8 +401,8 @@ async def chat(request: ChatRequest):
     resolved_system_prompt = request.system_prompt
     resolved_person_identity = request.person_identity
 
-    auto_knowledge_context = ""
-    wiki_context = ""
+    team_wiki_context = ""
+    person_wiki_context = ""
     knowledge_count = 0
     if person:
         if not resolved_system_prompt:
@@ -382,9 +418,14 @@ async def chat(request: ChatRequest):
 
         person_knowledge = list_knowledge_entries(request.person_id)
         knowledge_count = len(person_knowledge)
-        auto_knowledge_context = render_knowledge_context(request.person_id, max_entries=10)
-        wiki_context = render_wiki_context(
-            request.person_id,
+        # Keep personal wiki synced with latest team wiki snapshot before prompt build.
+        sync_team_snapshot_for_person(request.person_id)
+        team_wiki_context = render_team_context(
+            max_pages=settings.wiki_context_max_pages,
+            max_chars=settings.wiki_context_max_chars,
+        )
+        person_wiki_context = render_person_context(
+            person_id=request.person_id,
             max_pages=settings.wiki_context_max_pages,
             max_chars=settings.wiki_context_max_chars,
         )
@@ -393,10 +434,10 @@ async def chat(request: ChatRequest):
         knowledge_text=request.knowledge_text,
         knowledge_files=request.knowledge_files,
     )
-    if wiki_context:
-        inline_knowledge_inputs.insert(0, wiki_context)
-    if auto_knowledge_context:
-        inline_knowledge_inputs.insert(0, auto_knowledge_context)
+    if person_wiki_context:
+        inline_knowledge_inputs.insert(0, person_wiki_context)
+    if team_wiki_context:
+        inline_knowledge_inputs.insert(0, team_wiki_context)
     merged_knowledge_text = "\n\n".join(inline_knowledge_inputs).strip() if inline_knowledge_inputs else None
 
     prompt = build_prompt(
@@ -429,7 +470,8 @@ async def chat(request: ChatRequest):
             "retrieved_chunks": len(retrieved_docs),
             "person_found": person is not None,
             "knowledge_entries_used": knowledge_count,
-            "wiki_context_used": bool(wiki_context),
+            "team_context_used": bool(team_wiki_context),
+            "person_wiki_context_used": bool(person_wiki_context),
         },
     )
 
@@ -448,7 +490,8 @@ async def chat(request: ChatRequest):
             ],
             "person_found": person is not None,
             "knowledge_entries_used": knowledge_count,
-            "wiki_context_used": bool(wiki_context),
+            "team_context_used": bool(team_wiki_context),
+            "person_wiki_context_used": bool(person_wiki_context),
         },
     )
 

@@ -1,4 +1,4 @@
-"""Persistent per-person wiki service (Approach B)."""
+"""Markdown-first wiki storage for team + person knowledge."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -6,14 +6,30 @@ import json
 from pathlib import Path
 import re
 import shutil
+from typing import Any
 
 from config.settings import get_settings
-from src.core.exceptions import NotFoundError, ValidationError
+from src.core.exceptions import NotFoundError, PersonXException, ValidationError
 from src.models.schemas import KnowledgeEntryResponse, PersonResponse
 
 
 _SETTINGS = get_settings()
 _APP_ROOT = Path(__file__).resolve().parents[2]
+_MACHINE_BLOCK_RE = re.compile(
+    r"<!-- MACHINE_DATA_START -->\s*```json\s*(\{.*?\})\s*```\s*<!-- MACHINE_DATA_END -->",
+    flags=re.DOTALL,
+)
+
+TEAM_WIKI_ID = "core-team"
+TEAM_WIKI_NAME = "Core Team Wiki"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat()
 
 
 def _resolve_wiki_root() -> Path:
@@ -24,8 +40,18 @@ def _resolve_wiki_root() -> Path:
     return root
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _wiki_root() -> Path:
+    root = _resolve_wiki_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _team_wiki_dir() -> Path:
+    return _wiki_root() / "team" / "core"
+
+
+def _persons_root_dir() -> Path:
+    return _wiki_root() / "persons"
 
 
 def _sanitize_person_key(person_id: str) -> str:
@@ -39,13 +65,20 @@ def _sanitize_person_key(person_id: str) -> str:
 
 
 def _person_wiki_dir(person_id: str) -> Path:
-    return _resolve_wiki_root() / _sanitize_person_key(person_id)
+    return _persons_root_dir() / _sanitize_person_key(person_id)
+
+
+def _ensure_team_wiki_dirs() -> Path:
+    team_dir = _team_wiki_dir()
+    team_dir.mkdir(parents=True, exist_ok=True)
+    return team_dir
 
 
 def _ensure_person_wiki_dirs(person_id: str) -> Path:
-    wiki_dir = _person_wiki_dir(person_id)
-    (wiki_dir / "knowledge").mkdir(parents=True, exist_ok=True)
-    return wiki_dir
+    person_dir = _person_wiki_dir(person_id)
+    (person_dir / "knowledge").mkdir(parents=True, exist_ok=True)
+    (person_dir / "synced").mkdir(parents=True, exist_ok=True)
+    return person_dir
 
 
 def _safe_read(path: Path) -> str:
@@ -62,23 +95,212 @@ def _extract_title(content: str, fallback: str) -> str:
     return fallback
 
 
-def _extract_person_name_from_profile(person_id: str) -> str | None:
-    profile_path = _person_wiki_dir(person_id) / "profile.md"
-    if not profile_path.exists():
-        return None
-    title = _extract_title(_safe_read(profile_path), fallback="")
-    if title.startswith("Profile:"):
-        return title.split("Profile:", maxsplit=1)[1].strip() or None
-    return title or None
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, indent=2, sort_keys=True)
 
 
-def _entry_title(entry: KnowledgeEntryResponse) -> str:
-    if entry.title and entry.title.strip():
-        return entry.title.strip()
-    return f"Knowledge {entry.id[:8]}"
+def _machine_block(data: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "<!-- MACHINE_DATA_START -->",
+            "```json",
+            _json_dumps(data),
+            "```",
+            "<!-- MACHINE_DATA_END -->",
+        ]
+    )
+
+
+def _extract_machine_data(content: str) -> dict[str, Any]:
+    match = _MACHINE_BLOCK_RE.search(content)
+    if not match:
+        return {}
+    try:
+        parsed = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
+
+
+def _default_team_pages() -> dict[str, str]:
+    now = _utc_now_iso()
+    return {
+        "index.md": "\n".join(
+            [
+                "# Core Team Wiki",
+                "",
+                "- Purpose: Shared source of truth for the whole team.",
+                f"- Last Updated: {now}",
+                "",
+                "## Primary Pages",
+                "- [Current Status](status.md)",
+                "- [Shared Runbook](runbook.md)",
+                "- [Team Decisions](decisions.md)",
+                "- [Team Log](log.md)",
+                "",
+                "## Notes",
+                "- Treat this wiki like the `main` branch.",
+                "- Person-specific wikis are like feature branches.",
+            ]
+        )
+        + "\n",
+        "status.md": "\n".join(
+            [
+                "# Team Status",
+                "",
+                f"- Updated: {now}",
+                "- Incident State: Stable",
+                "- Release Phase: Controlled rollout",
+                "- Current Priority: Payments reliability + deploy safety",
+                "",
+                "## Active Focus",
+                "- Keep checkout success and auth metrics healthy during releases.",
+                "- Escalate quickly when confidence is low.",
+            ]
+        )
+        + "\n",
+        "runbook.md": "\n".join(
+            [
+                "# Shared Runbook",
+                "",
+                "## Release Safety",
+                "- All required CI checks must pass.",
+                "- Rollout should be staged and validated by metrics.",
+                "- Keep rollback owner assigned before production changes.",
+                "",
+                "## Incident Response",
+                "- Use incident channel when customer impact is visible.",
+                "- Prefer mitigation-first when blast radius is unknown.",
+            ]
+        )
+        + "\n",
+        "decisions.md": "\n".join(
+            [
+                "# Team Decisions",
+                "",
+                "## 2026-04",
+                "- Team wiki is the primary shared context for all personal assistants.",
+                "- Personal wiki context is applied only for the selected person.",
+                "- Team context is always fed first to keep shared truth aligned.",
+            ]
+        )
+        + "\n",
+        "log.md": "# Team Wiki Log\n\n",
+    }
+
+
+def _append_team_log(action: str, details: str) -> None:
+    team_dir = _ensure_team_wiki_dirs()
+    log_path = team_dir / "log.md"
+    if not log_path.exists():
+        log_path.write_text("# Team Wiki Log\n\n", encoding="utf-8")
+    block = f"## [{_utc_now_iso()}] {action}\n{details.strip()}\n\n"
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(block)
+
+
+def ensure_team_wiki(seed_pages: dict[str, str] | None = None) -> None:
+    team_dir = _ensure_team_wiki_dirs()
+    pages = seed_pages or _default_team_pages()
+    created = 0
+    for name, content in pages.items():
+        page_path = team_dir / name
+        if page_path.exists():
+            continue
+        page_path.write_text(content, encoding="utf-8")
+        created += 1
+    if created:
+        _append_team_log("team_wiki_initialized", f"Initialized {created} team wiki pages.")
+
+
+def write_team_wiki_page(
+    page_name: str,
+    content: str,
+    log_action: str | None = None,
+) -> str:
+    ensure_team_wiki()
+    if not page_name.endswith(".md"):
+        raise ValidationError(
+            message="Team wiki page must be markdown",
+            details={"page_name": page_name},
+        )
+    page_path = (_team_wiki_dir() / page_name).resolve()
+    team_dir = _team_wiki_dir().resolve()
+    if page_path != team_dir and team_dir not in page_path.parents:
+        raise ValidationError(
+            message="Team wiki page path outside allowed directory",
+            details={"page_name": page_name},
+        )
+    page_path.parent.mkdir(parents=True, exist_ok=True)
+    page_path.write_text(content.strip() + "\n", encoding="utf-8")
+    _append_team_log(log_action or "team_page_upsert", f"Updated team page `{page_name}`.")
+    return page_path.relative_to(team_dir).as_posix()
+
+
+def list_team_pages() -> list[dict[str, str]]:
+    ensure_team_wiki()
+    team_dir = _team_wiki_dir().resolve()
+    pages: list[dict[str, str]] = []
+    for page in sorted(team_dir.rglob("*.md")):
+        content = _safe_read(page)
+        pages.append(
+            {
+                "path": page.relative_to(team_dir).as_posix(),
+                "title": _extract_title(content, fallback=page.stem),
+                "updated_at": datetime.fromtimestamp(page.stat().st_mtime, tz=timezone.utc).isoformat(),
+            }
+        )
+    return pages
+
+
+def get_team_wiki_overview() -> dict[str, object]:
+    ensure_team_wiki()
+    team_dir = _team_wiki_dir().resolve()
+    return {
+        "team_id": TEAM_WIKI_ID,
+        "team_name": TEAM_WIKI_NAME,
+        "root_path": str(team_dir),
+        "index_content": _safe_read(team_dir / "index.md"),
+        "log_content": _safe_read(team_dir / "log.md"),
+        "pages": list_team_pages(),
+    }
+
+
+def read_team_wiki_page(page_path: str) -> dict[str, str]:
+    ensure_team_wiki()
+    if not page_path or not page_path.strip():
+        raise ValidationError(message="Team wiki page path is required")
+    team_dir = _team_wiki_dir().resolve()
+    resolved = (team_dir / page_path).resolve()
+    if resolved != team_dir and team_dir not in resolved.parents:
+        raise ValidationError(
+            message="Team wiki page path outside allowed directory",
+            details={"page_path": page_path},
+        )
+    if resolved.suffix.lower() != ".md":
+        raise ValidationError(
+            message="Only markdown pages are supported",
+            details={"page_path": page_path},
+        )
+    if not resolved.exists() or not resolved.is_file():
+        raise NotFoundError(
+            message=f"Team wiki page not found: {page_path}",
+            details={"page_path": page_path},
+        )
+    content = resolved.read_text(encoding="utf-8")
+    return {
+        "team_id": TEAM_WIKI_ID,
+        "path": resolved.relative_to(team_dir).as_posix(),
+        "title": _extract_title(content, fallback=resolved.stem),
+        "updated_at": datetime.fromtimestamp(resolved.stat().st_mtime, tz=timezone.utc).isoformat(),
+        "content": content,
+    }
 
 
 def _build_profile_page(person: PersonResponse) -> str:
+    payload = person.model_dump(mode="json")
     lines: list[str] = [
         f"# Profile: {person.name}",
         "",
@@ -89,45 +311,21 @@ def _build_profile_page(person: PersonResponse) -> str:
         f"- Updated At: {person.updated_at.isoformat()}",
         "",
     ]
-
     if person.base_system_prompt:
-        lines.extend(
-            [
-                "## Base System Prompt",
-                person.base_system_prompt.strip(),
-                "",
-            ]
-        )
-
+        lines.extend(["## Base System Prompt", person.base_system_prompt.strip(), ""])
     if person.communication_style:
-        lines.extend(
-            [
-                "## Communication Style",
-                "```json",
-                json.dumps(person.communication_style, indent=2, sort_keys=True),
-                "```",
-                "",
-            ]
-        )
-
+        lines.extend(["## Communication Style", _json_dumps(person.communication_style), ""])
     if person.metadata:
-        lines.extend(
-            [
-                "## Metadata",
-                "```json",
-                json.dumps(person.metadata, indent=2, sort_keys=True),
-                "```",
-                "",
-            ]
-        )
-
+        lines.extend(["## Metadata", _json_dumps(person.metadata), ""])
+    lines.extend(["## Machine Data", _machine_block(payload), ""])
     return "\n".join(lines).strip() + "\n"
 
 
 def _build_knowledge_page(entry: KnowledgeEntryResponse) -> str:
+    payload = entry.model_dump(mode="json")
     tags = ", ".join(entry.tags or [])
     lines: list[str] = [
-        f"# Knowledge: {_entry_title(entry)}",
+        f"# Knowledge: {entry.title or entry.id[:8]}",
         "",
         f"- Entry ID: {entry.id}",
         f"- Person ID: {entry.person_id}",
@@ -139,318 +337,391 @@ def _build_knowledge_page(entry: KnowledgeEntryResponse) -> str:
         f"- Updated At: {entry.updated_at.isoformat()}",
         "",
     ]
-
     if entry.summary:
-        lines.extend(
-            [
-                "## Summary",
-                entry.summary.strip(),
-                "",
-            ]
-        )
-
-    lines.extend(
-        [
-            "## Content",
-            entry.content.strip(),
-            "",
-        ]
-    )
-
+        lines.extend(["## Summary", entry.summary.strip(), ""])
+    lines.extend(["## Content", entry.content.strip(), ""])
     if entry.metadata:
-        lines.extend(
-            [
-                "## Metadata",
-                "```json",
-                json.dumps(entry.metadata, indent=2, sort_keys=True),
-                "```",
-                "",
-            ]
-        )
-
+        lines.extend(["## Metadata", _json_dumps(entry.metadata), ""])
+    lines.extend(["## Machine Data", _machine_block(payload), ""])
     return "\n".join(lines).strip() + "\n"
 
 
-def _ensure_log_file(person_id: str) -> Path:
-    wiki_dir = _ensure_person_wiki_dirs(person_id)
-    log_path = wiki_dir / "log.md"
-    if not log_path.exists():
-        log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
-    return log_path
-
-
-def _append_log(person_id: str, action: str, details: str) -> None:
-    log_path = _ensure_log_file(person_id)
-    block = f"## [{_utc_now_iso()}] {action}\n{details.strip()}\n\n"
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(block)
-
-
-def _build_index_page(person_id: str, person_name: str | None = None) -> str:
-    wiki_dir = _ensure_person_wiki_dirs(person_id)
-    resolved_name = person_name or _extract_person_name_from_profile(person_id) or person_id
+def _build_person_index_page(person: PersonResponse) -> str:
+    person_dir = _ensure_person_wiki_dirs(person.id)
     knowledge_pages = sorted(
-        (wiki_dir / "knowledge").glob("*.md"),
+        (person_dir / "knowledge").glob("*.md"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-
     lines: list[str] = [
-        f"# Wiki Index: {resolved_name}",
+        f"# Wiki Index: {person.name}",
         "",
-        f"- Person ID: {person_id}",
+        f"- Person ID: {person.id}",
         f"- Updated At: {_utc_now_iso()}",
         "",
         "## Core Pages",
         "- [Profile](profile.md)",
         "- [Log](log.md)",
+        "- [Synced Team Snapshot](synced/team_core_snapshot.md)",
         "",
         "## Knowledge Pages",
     ]
-
     if not knowledge_pages:
         lines.append("- None yet.")
     else:
         for page in knowledge_pages:
-            relative = page.relative_to(wiki_dir).as_posix()
-            content = _safe_read(page)
-            title = _extract_title(content, fallback=page.stem)
+            relative = page.relative_to(person_dir).as_posix()
+            title = _extract_title(_safe_read(page), fallback=page.stem)
             updated_at = datetime.fromtimestamp(page.stat().st_mtime, tz=timezone.utc).isoformat()
             lines.append(f"- [{title}]({relative}) - updated {updated_at}")
-
     lines.append("")
     return "\n".join(lines)
 
 
-def _write_index(person_id: str, person_name: str | None = None) -> None:
-    wiki_dir = _ensure_person_wiki_dirs(person_id)
-    index_content = _build_index_page(person_id=person_id, person_name=person_name)
-    (wiki_dir / "index.md").write_text(index_content, encoding="utf-8")
+def _append_person_log(person_id: str, action: str, details: str) -> None:
+    person_dir = _ensure_person_wiki_dirs(person_id)
+    log_path = person_dir / "log.md"
+    if not log_path.exists():
+        log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
+    block = f"## [{_utc_now_iso()}] {action}\n{details.strip()}\n\n"
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(block)
 
 
-def _resolve_wiki_page_path(person_id: str, page_path: str) -> Path:
-    if not page_path or not page_path.strip():
-        raise ValidationError(
-            message="Wiki page path is required",
-            details={"page_path": page_path},
-        )
+def _write_person_index(person: PersonResponse) -> None:
+    person_dir = _ensure_person_wiki_dirs(person.id)
+    (person_dir / "index.md").write_text(_build_person_index_page(person), encoding="utf-8")
 
-    wiki_dir = _person_wiki_dir(person_id).resolve()
-    candidate = (wiki_dir / page_path).resolve()
-    if candidate != wiki_dir and wiki_dir not in candidate.parents:
-        raise ValidationError(
-            message="Wiki page path is outside allowed directory",
-            details={"page_path": page_path},
+
+def list_person_ids() -> list[str]:
+    root = _persons_root_dir()
+    if not root.exists():
+        return []
+    return sorted([item.name for item in root.iterdir() if item.is_dir()])
+
+
+def parse_person_profile_page(person_id: str) -> PersonResponse:
+    profile_path = _person_wiki_dir(person_id) / "profile.md"
+    if not profile_path.exists() or not profile_path.is_file():
+        raise NotFoundError(
+            message=f"Person profile wiki not found: {person_id}",
+            details={"person_id": person_id},
         )
-    if candidate.suffix.lower() != ".md":
-        raise ValidationError(
-            message="Only markdown wiki pages are supported",
-            details={"page_path": page_path},
-        )
-    return candidate
+    content = profile_path.read_text(encoding="utf-8")
+    machine = _extract_machine_data(content)
+    if machine:
+        return PersonResponse(**machine)
+    raise ValidationError(
+        message="Person profile page is missing machine data block",
+        details={"person_id": person_id, "path": str(profile_path)},
+    )
+
+
+def list_person_profiles() -> list[PersonResponse]:
+    profiles: list[PersonResponse] = []
+    for person_id in list_person_ids():
+        try:
+            profiles.append(parse_person_profile_page(person_id))
+        except PersonXException:
+            continue
+    return sorted(profiles, key=lambda item: item.updated_at, reverse=True)
 
 
 def initialize_person_wiki(person: PersonResponse) -> None:
-    wiki_dir = _ensure_person_wiki_dirs(person.id)
-    (wiki_dir / "profile.md").write_text(_build_profile_page(person), encoding="utf-8")
-    _ensure_log_file(person.id)
-    _write_index(person.id, person_name=person.name)
-    _append_log(
-        person.id,
-        "person_initialized",
-        f"Initialized wiki for {person.name}.",
-    )
+    person_dir = _ensure_person_wiki_dirs(person.id)
+    (person_dir / "profile.md").write_text(_build_profile_page(person), encoding="utf-8")
+    if not (person_dir / "log.md").exists():
+        (person_dir / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
+    sync_team_snapshot_for_person(person.id)
+    _write_person_index(person)
+    _append_person_log(person.id, "person_initialized", f"Initialized wiki for {person.name}.")
 
 
 def sync_person_profile_page(person: PersonResponse) -> None:
-    wiki_dir = _ensure_person_wiki_dirs(person.id)
-    (wiki_dir / "profile.md").write_text(_build_profile_page(person), encoding="utf-8")
-    _write_index(person.id, person_name=person.name)
-    _append_log(
-        person.id,
-        "profile_updated",
-        f"Updated profile for {person.name}.",
-    )
+    person_dir = _ensure_person_wiki_dirs(person.id)
+    (person_dir / "profile.md").write_text(_build_profile_page(person), encoding="utf-8")
+    sync_team_snapshot_for_person(person.id)
+    _write_person_index(person)
+    _append_person_log(person.id, "profile_updated", f"Updated profile for {person.name}.")
+
+
+def _knowledge_page_path(person_id: str, knowledge_id: str) -> Path:
+    return _ensure_person_wiki_dirs(person_id) / "knowledge" / f"{knowledge_id}.md"
 
 
 def upsert_knowledge_page(person_id: str, entry: KnowledgeEntryResponse) -> str:
-    wiki_dir = _ensure_person_wiki_dirs(person_id)
-    page_path = wiki_dir / "knowledge" / f"{entry.id}.md"
+    page_path = _knowledge_page_path(person_id, entry.id)
     page_path.write_text(_build_knowledge_page(entry), encoding="utf-8")
-    _write_index(person_id)
-    _append_log(
+    person = parse_person_profile_page(person_id)
+    sync_team_snapshot_for_person(person_id)
+    _write_person_index(person)
+    _append_person_log(
         person_id,
         "knowledge_upsert",
-        f"Upserted knowledge page for entry {entry.id} ({_entry_title(entry)}).",
+        f"Upserted knowledge entry {entry.id} ({entry.title or 'untitled'}).",
     )
-    return page_path.relative_to(wiki_dir).as_posix()
+    return page_path.relative_to(_person_wiki_dir(person_id)).as_posix()
+
+
+def delete_knowledge_page(person_id: str, knowledge_id: str) -> bool:
+    page_path = _knowledge_page_path(person_id, knowledge_id)
+    if not page_path.exists():
+        return False
+    page_path.unlink(missing_ok=True)
+    person = parse_person_profile_page(person_id)
+    _write_person_index(person)
+    _append_person_log(person_id, "knowledge_deleted", f"Deleted knowledge entry {knowledge_id}.")
+    return True
+
+
+def list_person_knowledge_entries(person_id: str) -> list[KnowledgeEntryResponse]:
+    person_dir = _person_wiki_dir(person_id)
+    if not person_dir.exists() or not person_dir.is_dir():
+        raise NotFoundError(
+            message=f"Wiki not found for person: {person_id}",
+            details={"person_id": person_id},
+        )
+    entries: list[KnowledgeEntryResponse] = []
+    for page in sorted((person_dir / "knowledge").glob("*.md")):
+        content = page.read_text(encoding="utf-8")
+        machine = _extract_machine_data(content)
+        if not machine:
+            continue
+        try:
+            entries.append(KnowledgeEntryResponse(**machine))
+        except Exception:
+            continue
+    return sorted(entries, key=lambda item: item.created_at, reverse=True)
+
+
+def get_person_knowledge_entry(person_id: str, knowledge_id: str) -> KnowledgeEntryResponse:
+    for entry in list_person_knowledge_entries(person_id):
+        if entry.id == knowledge_id:
+            return entry
+    raise NotFoundError(
+        message=f"Knowledge entry not found: {knowledge_id}",
+        details={"person_id": person_id, "knowledge_id": knowledge_id},
+    )
+
+
+def sync_team_snapshot_for_person(person_id: str) -> None:
+    ensure_team_wiki()
+    person_dir = _ensure_person_wiki_dirs(person_id)
+    snapshot_path = person_dir / "synced" / "team_core_snapshot.md"
+    index_text = _safe_read(_team_wiki_dir() / "index.md").strip()
+    status_text = _safe_read(_team_wiki_dir() / "status.md").strip()
+    runbook_text = _safe_read(_team_wiki_dir() / "runbook.md").strip()
+    snapshot = "\n\n".join(
+        [
+            "# Synced Core Team Snapshot",
+            "",
+            f"- Synced At: {_utc_now_iso()}",
+            "",
+            "## Team Index",
+            index_text or "No index available.",
+            "",
+            "## Team Status",
+            status_text or "No status available.",
+            "",
+            "## Team Runbook",
+            runbook_text or "No runbook available.",
+        ]
+    ).strip()
+    snapshot_path.write_text(snapshot + "\n", encoding="utf-8")
+
+
+def sync_team_to_all_person_wikis() -> int:
+    count = 0
+    for person_id in list_person_ids():
+        sync_team_snapshot_for_person(person_id)
+        count += 1
+    if count:
+        _append_team_log("team_sync", f"Synced team snapshot into {count} person wiki folders.")
+    return count
+
+
+def render_team_context(max_pages: int = 3, max_chars: int = 5000) -> str:
+    ensure_team_wiki()
+    team_dir = _team_wiki_dir()
+    priority = ["index.md", "status.md", "runbook.md", "decisions.md"]
+    pages: list[Path] = [team_dir / name for name in priority if (team_dir / name).exists()]
+    if max_pages > 0:
+        pages = pages[:max_pages]
+    blocks: list[str] = []
+    for page in pages:
+        text = _safe_read(page).strip()
+        if not text:
+            continue
+        blocks.append(f"[Team Wiki: {page.name}]\n{text}")
+    context = "\n\n".join(blocks).strip()
+    if len(context) <= max_chars:
+        return context
+    return context[:max_chars].rstrip() + "\n\n[Team context truncated]"
+
+
+def render_person_context(person_id: str, max_pages: int = 4, max_chars: int = 6000) -> str:
+    person_dir = _person_wiki_dir(person_id)
+    if not person_dir.exists():
+        return ""
+
+    blocks: list[str] = []
+    profile_text = _safe_read(person_dir / "profile.md").strip()
+    if profile_text:
+        blocks.append("[Person Wiki: profile.md]\n" + profile_text)
+
+    synced_text = _safe_read(person_dir / "synced" / "team_core_snapshot.md").strip()
+    if synced_text:
+        blocks.append("[Person Wiki: synced/team_core_snapshot.md]\n" + synced_text)
+
+    knowledge_pages = sorted(
+        (person_dir / "knowledge").glob("*.md"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if max_pages > 0:
+        knowledge_pages = knowledge_pages[:max_pages]
+
+    for page in knowledge_pages:
+        text = _safe_read(page).strip()
+        if not text:
+            continue
+        blocks.append(f"[Person Wiki: {page.relative_to(person_dir).as_posix()}]\n{text}")
+
+    context = "\n\n".join(blocks).strip()
+    if len(context) <= max_chars:
+        return context
+    return context[:max_chars].rstrip() + "\n\n[Person context truncated]"
+
+
+def render_combined_context(
+    person_id: str,
+    team_max_pages: int = 3,
+    person_max_pages: int = 4,
+    max_chars: int = 11000,
+) -> str:
+    team = render_team_context(max_pages=team_max_pages, max_chars=max_chars)
+    person = render_person_context(person_id=person_id, max_pages=person_max_pages, max_chars=max_chars)
+    merged = "\n\n".join(section for section in [team, person] if section.strip()).strip()
+    if len(merged) <= max_chars:
+        return merged
+    return merged[:max_chars].rstrip() + "\n\n[Combined context truncated]"
+
+
+def _resolve_person_wiki_page_path(person_id: str, page_path: str) -> Path:
+    if not page_path or not page_path.strip():
+        raise ValidationError(message="Wiki page path is required")
+    person_dir = _person_wiki_dir(person_id).resolve()
+    resolved = (person_dir / page_path).resolve()
+    if resolved != person_dir and person_dir not in resolved.parents:
+        raise ValidationError(
+            message="Wiki page path outside allowed directory",
+            details={"page_path": page_path},
+        )
+    if resolved.suffix.lower() != ".md":
+        raise ValidationError(
+            message="Only markdown pages are supported",
+            details={"page_path": page_path},
+        )
+    return resolved
+
+
+def list_person_wiki_pages(person_id: str) -> list[dict[str, str]]:
+    person_dir = _person_wiki_dir(person_id).resolve()
+    if not person_dir.exists() or not person_dir.is_dir():
+        raise NotFoundError(
+            message=f"Wiki not found for person: {person_id}",
+            details={"person_id": person_id},
+        )
+    pages: list[dict[str, str]] = []
+    for page in sorted(person_dir.rglob("*.md")):
+        content = _safe_read(page)
+        pages.append(
+            {
+                "path": page.relative_to(person_dir).as_posix(),
+                "title": _extract_title(content, fallback=page.stem),
+                "updated_at": datetime.fromtimestamp(page.stat().st_mtime, tz=timezone.utc).isoformat(),
+            }
+        )
+    return pages
+
+
+def get_person_wiki_overview(person_id: str) -> dict[str, object]:
+    person_dir = _person_wiki_dir(person_id).resolve()
+    if not person_dir.exists() or not person_dir.is_dir():
+        raise NotFoundError(
+            message=f"Wiki not found for person: {person_id}",
+            details={"person_id": person_id},
+        )
+    return {
+        "person_id": person_id,
+        "root_path": str(person_dir),
+        "index_content": _safe_read(person_dir / "index.md"),
+        "log_content": _safe_read(person_dir / "log.md"),
+        "pages": list_person_wiki_pages(person_id),
+    }
+
+
+def read_person_wiki_page(person_id: str, page_path: str) -> dict[str, str]:
+    person_dir = _person_wiki_dir(person_id).resolve()
+    if not person_dir.exists() or not person_dir.is_dir():
+        raise NotFoundError(
+            message=f"Wiki not found for person: {person_id}",
+            details={"person_id": person_id},
+        )
+    resolved = _resolve_person_wiki_page_path(person_id, page_path)
+    if not resolved.exists() or not resolved.is_file():
+        raise NotFoundError(
+            message=f"Wiki page not found: {page_path}",
+            details={"person_id": person_id, "page_path": page_path},
+        )
+    content = resolved.read_text(encoding="utf-8")
+    return {
+        "person_id": person_id,
+        "path": resolved.relative_to(person_dir).as_posix(),
+        "title": _extract_title(content, fallback=resolved.stem),
+        "updated_at": datetime.fromtimestamp(resolved.stat().st_mtime, tz=timezone.utc).isoformat(),
+        "content": content,
+    }
 
 
 def rebuild_person_wiki(
     person: PersonResponse,
     knowledge_entries: list[KnowledgeEntryResponse],
 ) -> dict[str, int]:
-    wiki_dir = _ensure_person_wiki_dirs(person.id)
-    knowledge_dir = wiki_dir / "knowledge"
-    (wiki_dir / "profile.md").write_text(_build_profile_page(person), encoding="utf-8")
+    person_dir = _ensure_person_wiki_dirs(person.id)
+    knowledge_dir = person_dir / "knowledge"
+    (person_dir / "profile.md").write_text(_build_profile_page(person), encoding="utf-8")
 
-    incoming_ids = {entry.id for entry in knowledge_entries}
-    removed_count = 0
-    for existing_path in knowledge_dir.glob("*.md"):
-        if existing_path.stem in incoming_ids:
+    incoming = {entry.id for entry in knowledge_entries}
+    removed = 0
+    for page in knowledge_dir.glob("*.md"):
+        if page.stem in incoming:
             continue
-        existing_path.unlink(missing_ok=True)
-        removed_count += 1
+        page.unlink(missing_ok=True)
+        removed += 1
 
-    written_count = 0
+    written = 0
     for entry in sorted(knowledge_entries, key=lambda item: item.created_at):
-        (knowledge_dir / f"{entry.id}.md").write_text(
-            _build_knowledge_page(entry),
-            encoding="utf-8",
-        )
-        written_count += 1
+        (knowledge_dir / f"{entry.id}.md").write_text(_build_knowledge_page(entry), encoding="utf-8")
+        written += 1
 
-    _write_index(person.id, person_name=person.name)
-    _append_log(
+    sync_team_snapshot_for_person(person.id)
+    _write_person_index(person)
+    _append_person_log(
         person.id,
         "wiki_rebuilt",
-        f"Rebuilt wiki with {written_count} knowledge pages and removed {removed_count} stale pages.",
+        f"Rebuilt wiki with {written} knowledge pages and removed {removed} stale pages.",
     )
-
-    return {"written_pages": written_count, "removed_pages": removed_count}
-
-
-def list_wiki_pages(person_id: str) -> list[dict[str, str]]:
-    wiki_dir = _person_wiki_dir(person_id).resolve()
-    if not wiki_dir.exists() or not wiki_dir.is_dir():
-        raise NotFoundError(
-            message=f"Wiki not found for person: {person_id}",
-            details={"person_id": person_id},
-        )
-
-    pages: list[dict[str, str]] = []
-    for page in sorted(wiki_dir.rglob("*.md")):
-        content = _safe_read(page)
-        pages.append(
-            {
-                "path": page.relative_to(wiki_dir).as_posix(),
-                "title": _extract_title(content, fallback=page.stem),
-                "updated_at": datetime.fromtimestamp(
-                    page.stat().st_mtime,
-                    tz=timezone.utc,
-                ).isoformat(),
-            }
-        )
-    return pages
-
-
-def get_wiki_overview(person_id: str) -> dict[str, object]:
-    wiki_dir = _person_wiki_dir(person_id).resolve()
-    if not wiki_dir.exists() or not wiki_dir.is_dir():
-        raise NotFoundError(
-            message=f"Wiki not found for person: {person_id}",
-            details={"person_id": person_id},
-        )
-
-    index_content = _safe_read(wiki_dir / "index.md")
-    log_content = _safe_read(wiki_dir / "log.md")
-    pages = list_wiki_pages(person_id)
-
-    return {
-        "person_id": person_id,
-        "root_path": str(wiki_dir),
-        "index_content": index_content,
-        "log_content": log_content,
-        "pages": pages,
-    }
-
-
-def read_wiki_page(person_id: str, page_path: str) -> dict[str, str]:
-    wiki_dir = _person_wiki_dir(person_id).resolve()
-    if not wiki_dir.exists() or not wiki_dir.is_dir():
-        raise NotFoundError(
-            message=f"Wiki not found for person: {person_id}",
-            details={"person_id": person_id},
-        )
-
-    resolved_path = _resolve_wiki_page_path(person_id, page_path)
-    if not resolved_path.exists() or not resolved_path.is_file():
-        raise NotFoundError(
-            message=f"Wiki page not found: {page_path}",
-            details={"person_id": person_id, "page_path": page_path},
-        )
-
-    content = resolved_path.read_text(encoding="utf-8")
-    return {
-        "person_id": person_id,
-        "path": resolved_path.relative_to(wiki_dir).as_posix(),
-        "title": _extract_title(content, fallback=resolved_path.stem),
-        "updated_at": datetime.fromtimestamp(
-            resolved_path.stat().st_mtime,
-            tz=timezone.utc,
-        ).isoformat(),
-        "content": content,
-    }
-
-
-def render_wiki_context(
-    person_id: str,
-    max_pages: int | None = None,
-    max_chars: int | None = None,
-) -> str:
-    wiki_dir = _person_wiki_dir(person_id)
-    if not wiki_dir.exists() or not wiki_dir.is_dir():
-        return ""
-
-    page_limit = max_pages or _SETTINGS.wiki_context_max_pages
-    char_limit = max_chars or _SETTINGS.wiki_context_max_chars
-
-    sections: list[str] = []
-
-    index_text = _safe_read(wiki_dir / "index.md")
-    if index_text:
-        sections.append("[Wiki Index]\n" + index_text.strip())
-
-    profile_text = _safe_read(wiki_dir / "profile.md")
-    if profile_text:
-        sections.append("[Wiki Profile]\n" + profile_text.strip())
-
-    knowledge_pages = sorted(
-        (wiki_dir / "knowledge").glob("*.md"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )[:page_limit]
-
-    for page in knowledge_pages:
-        page_text = _safe_read(page)
-        if not page_text:
-            continue
-        title = _extract_title(page_text, fallback=page.stem)
-        relative = page.relative_to(wiki_dir).as_posix()
-        sections.append(f"[Wiki Page: {title} | {relative}]\n{page_text.strip()}")
-
-    context = "\n\n".join(section for section in sections if section.strip()).strip()
-    if not context:
-        return ""
-
-    if len(context) <= char_limit:
-        return context
-
-    trimmed = context[:char_limit].rstrip()
-    return trimmed + "\n\n[Wiki context truncated for prompt size]"
+    return {"written_pages": written, "removed_pages": removed}
 
 
 def reset_wiki_store() -> None:
-    """Reset file-backed wiki store (used by tests)."""
     root = _resolve_wiki_root()
     if not root.exists():
         return
-
-    # Safety check: never allow wiping filesystem roots.
     if len(root.parts) < 3:
         raise ValidationError(
             message="Refusing to reset wiki store for unsafe root path",
             details={"root": str(root)},
         )
-
     shutil.rmtree(root)

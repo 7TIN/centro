@@ -20,17 +20,26 @@ export type PersonAiChatMessage = {
   timestamp: string;
 };
 
+export type PersonSelectorOption = {
+  id: string;
+  label: string;
+};
+
 type PersonAiChatProps = {
   personName: string;
   personId: string | null;
+  persons: PersonSelectorOption[];
+  selectedPersonId: string | null;
   messages: PersonAiChatMessage[];
   chatInput: string;
   chatLoading: boolean;
   chatError: string | null;
   suggestedQuestions: string[];
+  switchingPerson?: boolean;
   onSend: () => void;
   onChatInputChange: (value: string) => void;
   onPickSuggestedQuestion: (value: string) => void;
+  onSelectPerson: (personId: string) => void;
 };
 
 function renderInlineContent(text: string): ReactNode[] {
@@ -68,14 +77,18 @@ function renderMessageContent(content: string): ReactNode {
 export function PersonAiChat({
   personName,
   personId,
+  persons,
+  selectedPersonId,
   messages,
   chatInput,
   chatLoading,
   chatError,
   suggestedQuestions,
+  switchingPerson = false,
   onSend,
   onChatInputChange,
   onPickSuggestedQuestion,
+  onSelectPerson,
 }: PersonAiChatProps) {
   const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -97,7 +110,7 @@ export function PersonAiChat({
     <main className="flex h-[100dvh] w-full items-center justify-center bg-neutral-50/50 p-4 md:p-6 lg:p-8">
       <div className="h-full max-h-[900px] w-full max-w-6xl">
         <Card className="flex h-full flex-col overflow-hidden shadow-lg border-neutral-200/60 bg-white">
-          <CardHeader className="flex flex-row items-center justify-between border-b bg-white px-6 py-4 shadow-sm z-10">
+          <CardHeader className="flex flex-wrap items-center justify-between gap-3 border-b bg-white px-6 py-4 shadow-sm z-10">
             <div className="flex flex-col space-y-1.5">
               <CardTitle className="text-xl font-bold tracking-tight text-neutral-900">
                 {personName}
@@ -106,19 +119,42 @@ export function PersonAiChat({
                 Chat with this person AI
               </CardDescription>
             </div>
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="rounded-full px-4 shadow-sm hover:bg-neutral-100"
-            >
-              <Link href={knowledgeHref}>Knowledge</Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <label className="sr-only" htmlFor="person-selector">
+                Select person
+              </label>
+              <select
+                id="person-selector"
+                className="h-9 min-w-[180px] rounded-full border border-neutral-300 bg-white px-3 text-sm text-neutral-800"
+                disabled={switchingPerson || persons.length === 0}
+                onChange={(event) => onSelectPerson(event.target.value)}
+                value={selectedPersonId ?? ""}
+              >
+                {persons.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="rounded-full px-4 shadow-sm hover:bg-neutral-100"
+              >
+                <Link href={knowledgeHref}>Knowledge</Link>
+              </Button>
+            </div>
           </CardHeader>
 
           <CardContent className="flex flex-1 flex-col p-0 overflow-hidden bg-neutral-50/30">
             <section className="flex flex-1 flex-col overflow-hidden relative">
               <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-thin">
+                {switchingPerson ? (
+                  <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-600">
+                    Switching person and starting a fresh chat session...
+                  </div>
+                ) : null}
                 {messages.length === 0 ? (
                   <div className="flex h-full items-center justify-center">
                     <div className="text-center bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm max-w-sm">
@@ -180,7 +216,7 @@ export function PersonAiChat({
                   <div className="absolute right-2 bottom-2">
                     <Button
                       className="rounded-xl px-5 font-semibold shadow-sm transition-all"
-                      disabled={chatLoading || !chatInput.trim()}
+                      disabled={chatLoading || switchingPerson || !chatInput.trim()}
                       onClick={onSend}
                       size="sm"
                     >

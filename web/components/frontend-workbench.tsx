@@ -1,18 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   PersonAiChat,
   type PersonAiChatMessage,
+  type PersonSelectorOption,
 } from "@/components/person-ai-chat";
-import { ApiError, addKnowledgeEntry, chat, createPerson } from "@/lib/api";
-import {
-  AUTO_PROFILE,
-  AUTO_SUGGESTED_QUESTIONS,
-} from "@/lib/demo-person-data";
+import { ApiError, chat, demoBootstrap, type DemoPersonSummary } from "@/lib/api";
 
 type ChatSession = {
   personId: string;
@@ -34,42 +31,67 @@ function getErrorMessage(error: unknown): string {
   return "Request failed.";
 }
 
+function findPerson(persons: DemoPersonSummary[], personId: string | null): DemoPersonSummary | null {
+  if (!personId) {
+    return null;
+  }
+  return persons.find((person) => person.id === personId) ?? null;
+}
+
 export function FrontendWorkbench() {
   const [session, setSession] = useState<ChatSession | null>(null);
-  const [messages, setMessages] = useState<PersonAiChatMessage[]>([]);
+  const [persons, setPersons] = useState<DemoPersonSummary[]>([]);
   const [chatInput, setChatInput] = useState("");
+  const [messages, setMessages] = useState<PersonAiChatMessage[]>([]);
 
   const [setupLoading, setSetupLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
+  const [switchingPerson, setSwitchingPerson] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+
   const bootstrappedRef = useRef(false);
 
-  async function bootstrapDemoPerson() {
+  const activePerson = useMemo(
+    () => findPerson(persons, session?.personId ?? null),
+    [persons, session?.personId],
+  );
+
+  const suggestedQuestions = activePerson?.suggested_questions ?? [];
+
+  const personOptions = useMemo<PersonSelectorOption[]>(
+    () =>
+      persons.map((person) => ({
+        id: person.id,
+        label: person.role ? `${person.name} (${person.role})` : person.name,
+      })),
+    [persons],
+  );
+
+  async function bootstrapFromServer() {
     setSetupError(null);
     setSetupLoading(true);
 
     try {
-      const person = await createPerson({
-        name: AUTO_PROFILE.name,
-        role: AUTO_PROFILE.role,
-        department: AUTO_PROFILE.department,
-        base_system_prompt: AUTO_PROFILE.basePrompt,
-      });
+      const payload = await demoBootstrap();
+      const resolvedPersons = payload.persons;
+      const defaultPersonId =
+        payload.default_person_id ??
+        (resolvedPersons.length > 0 ? resolvedPersons[0].id : null);
+      const defaultPerson = findPerson(resolvedPersons, defaultPersonId);
 
-      await addKnowledgeEntry(person.id, {
-        content: AUTO_PROFILE.knowledge,
-        source_type: "manual",
-        priority: 8,
-      });
+      if (!defaultPersonId || !defaultPerson) {
+        throw new Error("No demo persons were returned by server bootstrap.");
+      }
 
+      setPersons(resolvedPersons);
       setSession({
-        personId: person.id,
-        personName: person.name,
+        personId: defaultPerson.id,
+        personName: defaultPerson.name,
         conversationId: "",
       });
       setMessages([]);
-      setChatInput(AUTO_PROFILE.firstQuestion);
+      setChatInput(defaultPerson.first_question ?? "");
     } catch (error: unknown) {
       setSetupError(getErrorMessage(error));
     } finally {
@@ -82,7 +104,7 @@ export function FrontendWorkbench() {
       return;
     }
     bootstrappedRef.current = true;
-    void bootstrapDemoPerson();
+    void bootstrapFromServer();
   }, []);
 
   async function sendMessage() {
@@ -143,12 +165,37 @@ export function FrontendWorkbench() {
     setChatInput(question);
   }
 
+  function switchPerson(personId: string) {
+    if (!personId) {
+      return;
+    }
+    if (session?.personId === personId) {
+      return;
+    }
+
+    const selected = findPerson(persons, personId);
+    if (!selected) {
+      return;
+    }
+
+    setSwitchingPerson(true);
+    setChatError(null);
+    setMessages([]);
+    setSession({
+      personId: selected.id,
+      personName: selected.name,
+      conversationId: "",
+    });
+    setChatInput(selected.first_question ?? "");
+    Promise.resolve().then(() => setSwitchingPerson(false));
+  }
+
   if (setupLoading && !session) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-white px-4 py-10 text-neutral-950 sm:px-6 lg:px-8">
         <Card className="w-full max-w-md rounded-md border-neutral-200 shadow-none">
           <CardContent className="py-8 text-center text-sm text-neutral-600">
-            Preparing demo person...
+            Preparing team and person demo wikis...
           </CardContent>
         </Card>
       </main>
@@ -164,7 +211,7 @@ export function FrontendWorkbench() {
             <Button
               className="rounded-md"
               disabled={setupLoading}
-              onClick={() => void bootstrapDemoPerson()}
+              onClick={() => void bootstrapFromServer()}
               variant="outline"
             >
               Retry
@@ -179,14 +226,18 @@ export function FrontendWorkbench() {
     <PersonAiChat
       personName={session?.personName ?? "Person AI"}
       personId={session?.personId ?? null}
+      persons={personOptions}
+      selectedPersonId={session?.personId ?? null}
       messages={messages}
       chatInput={chatInput}
       chatLoading={chatLoading}
       chatError={chatError}
-      suggestedQuestions={AUTO_SUGGESTED_QUESTIONS}
+      suggestedQuestions={suggestedQuestions}
+      switchingPerson={switchingPerson}
       onSend={() => void sendMessage()}
       onChatInputChange={setChatInput}
       onPickSuggestedQuestion={pickSuggestedQuestion}
+      onSelectPerson={switchPerson}
     />
   );
 }

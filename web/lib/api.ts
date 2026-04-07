@@ -125,6 +125,17 @@ export type KnowledgeEntryCreatePayload = {
   metadata?: JsonObject;
 };
 
+export type KnowledgeEntryUpdatePayload = {
+  content?: string;
+  title?: string;
+  summary?: string;
+  source_type?: string;
+  source_reference?: string;
+  tags?: string[];
+  priority?: number;
+  metadata?: JsonObject;
+};
+
 export type ChatRequestPayload = {
   person_id: string;
   message: string;
@@ -198,6 +209,56 @@ export type RetrievalSourceActionResponse = {
   indexed_chunks: number;
 };
 
+export type WikiPageSummary = {
+  path: string;
+  title: string;
+  updated_at: string;
+};
+
+export type PersonWikiOverviewResponse = {
+  person_id: string;
+  root_path: string;
+  index_content: string;
+  log_content: string;
+  pages: WikiPageSummary[];
+};
+
+export type TeamWikiOverviewResponse = {
+  team_id: string;
+  team_name: string;
+  root_path: string;
+  index_content: string;
+  log_content: string;
+  pages: WikiPageSummary[];
+};
+
+export type WikiPageResponse = {
+  path: string;
+  title: string;
+  updated_at: string;
+  content: string;
+  person_id?: string;
+  team_id?: string;
+};
+
+export type DemoPersonSummary = {
+  id: string;
+  name: string;
+  role: string | null;
+  department: string | null;
+  first_question: string | null;
+  suggested_questions: string[];
+};
+
+export type DemoBootstrapResponse = {
+  team_id: string;
+  team_name: string;
+  team_pages: number;
+  synced_person_wikis: number;
+  persons: DemoPersonSummary[];
+  default_person_id: string | null;
+};
+
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
@@ -251,6 +312,20 @@ export function listKnowledgeEntries(
   });
 }
 
+export function updateKnowledgeEntry(
+  personId: string,
+  knowledgeId: string,
+  payload: KnowledgeEntryUpdatePayload,
+): Promise<KnowledgeEntryResponse> {
+  return request<KnowledgeEntryResponse>(
+    `/v1/persons/${personId}/knowledge/${knowledgeId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function chat(payload: ChatRequestPayload): Promise<ChatResponse> {
   return request<ChatResponse>("/v1/chat", {
     method: "POST",
@@ -291,5 +366,37 @@ export function retrievalReplaceSource(
   return request<RetrievalSourceActionResponse>("/v1/retrieval/source/replace", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function demoBootstrap(): Promise<DemoBootstrapResponse> {
+  return request<DemoBootstrapResponse>("/v1/demo/bootstrap", {
+    method: "POST",
+  });
+}
+
+export function getPersonWiki(personId: string): Promise<PersonWikiOverviewResponse> {
+  return request<PersonWikiOverviewResponse>(`/v1/persons/${personId}/wiki`, {
+    method: "GET",
+  });
+}
+
+export function getPersonWikiPage(
+  personId: string,
+  pagePath: string,
+): Promise<WikiPageResponse> {
+  return request<WikiPageResponse>(
+    `/v1/persons/${personId}/wiki/pages/${pagePath}`,
+    { method: "GET" },
+  );
+}
+
+export function getTeamWiki(): Promise<TeamWikiOverviewResponse> {
+  return request<TeamWikiOverviewResponse>("/v1/team/wiki", { method: "GET" });
+}
+
+export function getTeamWikiPage(pagePath: string): Promise<WikiPageResponse> {
+  return request<WikiPageResponse>(`/v1/team/wiki/pages/${pagePath}`, {
+    method: "GET",
   });
 }

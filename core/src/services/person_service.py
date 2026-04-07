@@ -1,29 +1,52 @@
-"""In-memory person profile service for MVP persona chat."""
+"""Markdown-backed person profile service."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
+import re
 
 from src.core.exceptions import NotFoundError
 from src.models.schemas import PersonCreate, PersonResponse, PersonUpdate
+from src.services.wiki_service import (
+    initialize_person_wiki,
+    list_person_ids,
+    list_person_profiles,
+    parse_person_profile_page,
+    sync_person_profile_page,
+)
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-_PERSONS: dict[str, PersonResponse] = {}
+def _slugify(value: str) -> str:
+    lowered = value.strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+    return slug or "person"
+
+
+def _next_person_id(name: str) -> str:
+    base = _slugify(name)
+    existing = set(list_person_ids())
+    if base not in existing:
+        return base
+    suffix = 2
+    while True:
+        candidate = f"{base}-{suffix}"
+        if candidate not in existing:
+            return candidate
+        suffix += 1
 
 
 def reset_person_store() -> None:
-    """Reset in-memory person store (used by tests)."""
-    _PERSONS.clear()
+    """Compatibility no-op; wiki files are the source of truth."""
+    return None
 
 
 def create_person(payload: PersonCreate) -> PersonResponse:
     now = _utc_now()
     person = PersonResponse(
-        id=str(uuid4()),
+        id=_next_person_id(payload.name),
         name=payload.name,
         role=payload.role,
         department=payload.department,
@@ -34,26 +57,53 @@ def create_person(payload: PersonCreate) -> PersonResponse:
         created_at=now,
         updated_at=now,
     )
-    _PERSONS[person.id] = person
+    initialize_person_wiki(person)
+    return person
+
+
+def upsert_seed_person(
+    person_id: str,
+    name: str,
+    role: str | None = None,
+    department: str | None = None,
+    base_system_prompt: str | None = None,
+    communication_style: dict | None = None,
+    metadata: dict | None = None,
+) -> PersonResponse:
+    existing = try_get_person(person_id)
+    now = _utc_now()
+    person = PersonResponse(
+        id=person_id,
+        name=name,
+        role=role,
+        department=department,
+        base_system_prompt=base_system_prompt,
+        communication_style=communication_style,
+        is_active=True if existing is None else existing.is_active,
+        metadata=metadata,
+        created_at=existing.created_at if existing else now,
+        updated_at=now,
+    )
+    if existing is None:
+        initialize_person_wiki(person)
+    else:
+        sync_person_profile_page(person)
     return person
 
 
 def list_persons() -> list[PersonResponse]:
-    return sorted(_PERSONS.values(), key=lambda person: person.created_at, reverse=True)
+    return list_person_profiles()
 
 
 def get_person(person_id: str) -> PersonResponse:
-    person = _PERSONS.get(person_id)
-    if person is None:
-        raise NotFoundError(
-            message=f"Person not found: {person_id}",
-            details={"person_id": person_id},
-        )
-    return person
+    return parse_person_profile_page(person_id)
 
 
 def try_get_person(person_id: str) -> PersonResponse | None:
-    return _PERSONS.get(person_id)
+    try:
+        return parse_person_profile_page(person_id)
+    except NotFoundError:
+        return None
 
 
 def update_person(person_id: str, payload: PersonUpdate) -> PersonResponse:
@@ -62,16 +112,15 @@ def update_person(person_id: str, payload: PersonUpdate) -> PersonResponse:
     if not updates:
         return person
 
-    data = person.model_dump()
+    data = person.model_dump(mode="python")
     data.update(updates)
     data["updated_at"] = _utc_now()
     updated = PersonResponse(**data)
-    _PERSONS[person_id] = updated
+    sync_person_profile_page(updated)
     return updated
 
 
 def build_person_identity(person: PersonResponse) -> str:
-    """Build a compact identity block used in prompt assembly."""
     lines: list[str] = [f"Name: {person.name}"]
     if person.role:
         lines.append(f"Role: {person.role}")
@@ -80,3 +129,4 @@ def build_person_identity(person: PersonResponse) -> str:
     if person.communication_style:
         lines.append(f"Communication Style: {person.communication_style}")
     return "\n".join(lines)
+

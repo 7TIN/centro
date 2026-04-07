@@ -111,6 +111,34 @@ async def test_chat_includes_wiki_context_in_prompt(monkeypatch):
     assert chat_resp.status_code == 200
     body = chat_resp.json()
     assert body["response"] == "wiki-aware answer"
-    assert body["metadata"]["wiki_context_used"] is True
-    assert "[Wiki Index]" in captured["prompt"]
+    assert body["metadata"]["team_context_used"] is True
+    assert body["metadata"]["person_wiki_context_used"] is True
+    assert "[Team Wiki: index.md]" in captured["prompt"]
+    assert "[Person Wiki: profile.md]" in captured["prompt"]
     assert "Nina prefers rollback-first" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_demo_bootstrap_creates_team_and_multiple_person_wikis():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        bootstrap_resp = await client.post("/v1/demo/bootstrap")
+        assert bootstrap_resp.status_code == 200
+        payload = bootstrap_resp.json()
+        assert payload["team_id"] == "core-team"
+        assert len(payload["persons"]) >= 4
+        default_person = payload["default_person_id"]
+        assert default_person
+
+        team_wiki_resp = await client.get("/v1/team/wiki")
+        assert team_wiki_resp.status_code == 200
+        team_wiki = team_wiki_resp.json()
+        page_paths = {page["path"] for page in team_wiki["pages"]}
+        assert "index.md" in page_paths
+        assert "status.md" in page_paths
+
+        person_wiki_resp = await client.get(f"/v1/persons/{default_person}/wiki")
+        assert person_wiki_resp.status_code == 200
+        person_wiki = person_wiki_resp.json()
+        person_page_paths = {page["path"] for page in person_wiki["pages"]}
+        assert "synced/team_core_snapshot.md" in person_page_paths

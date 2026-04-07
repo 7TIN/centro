@@ -411,6 +411,45 @@ class WikiRebuildResponse(BaseModel):
     removed_pages: int = Field(..., ge=0, description="Stale pages removed")
 
 
+class TeamWikiOverviewResponse(BaseModel):
+    """Overview response for the core team wiki."""
+    team_id: str = Field(..., description="Team wiki ID")
+    team_name: str = Field(..., description="Team wiki display name")
+    root_path: str = Field(..., description="Absolute filesystem path for the team wiki")
+    index_content: str = Field("", description="Contents of team index page")
+    log_content: str = Field("", description="Contents of team log page")
+    pages: list[WikiPageSummary] = Field(default_factory=list)
+
+
+class TeamWikiPageResponse(BaseModel):
+    """Read response for an individual team wiki page."""
+    team_id: str = Field(..., description="Team wiki ID")
+    path: str = Field(..., description="Relative page path")
+    title: str = Field(..., description="Page title")
+    updated_at: str = Field(..., description="Last modified time (ISO-8601)")
+    content: str = Field(..., description="Markdown page content")
+
+
+class DemoPersonSummary(BaseModel):
+    """Demo person descriptor returned to frontend selector."""
+    id: str
+    name: str
+    role: Optional[str] = None
+    department: Optional[str] = None
+    first_question: Optional[str] = None
+    suggested_questions: list[str] = Field(default_factory=list)
+
+
+class DemoBootstrapResponse(BaseModel):
+    """Bootstrap response for server-side demo seed data."""
+    team_id: str
+    team_name: str
+    team_pages: int = Field(..., ge=0)
+    synced_person_wikis: int = Field(..., ge=0)
+    persons: list[DemoPersonSummary] = Field(default_factory=list)
+    default_person_id: Optional[str] = None
+
+
 # ============================================================================
 # Error Schemas
 # ============================================================================
