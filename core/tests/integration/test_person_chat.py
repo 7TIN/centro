@@ -6,6 +6,7 @@ from src.main import app
 from src.services.conversation_service import reset_conversation_store
 from src.services.knowledge_service import reset_knowledge_store
 from src.services.person_service import reset_person_store
+from src.services.wiki_service import reset_wiki_store
 
 
 @pytest.fixture(autouse=True)
@@ -13,6 +14,7 @@ def reset_stores():
     reset_person_store()
     reset_knowledge_store()
     reset_conversation_store()
+    reset_wiki_store()
 
 
 @pytest.mark.asyncio

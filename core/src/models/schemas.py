@@ -376,6 +376,42 @@ class RetrievalSourceActionResponse(BaseModel):
 
 
 # ============================================================================
+# Wiki Schemas
+# ============================================================================
+
+class WikiPageSummary(BaseModel):
+    """Summary metadata for a wiki page."""
+    path: str = Field(..., description="Relative page path in the person's wiki")
+    title: str = Field(..., description="Page title")
+    updated_at: str = Field(..., description="Last modified time (ISO-8601)")
+
+
+class WikiOverviewResponse(BaseModel):
+    """Overview response for a person's wiki."""
+    person_id: str = Field(..., description="Person ID")
+    root_path: str = Field(..., description="Absolute filesystem path for this person's wiki")
+    index_content: str = Field("", description="Contents of index.md")
+    log_content: str = Field("", description="Contents of log.md")
+    pages: list[WikiPageSummary] = Field(default_factory=list)
+
+
+class WikiPageResponse(BaseModel):
+    """Read response for an individual wiki page."""
+    person_id: str = Field(..., description="Person ID")
+    path: str = Field(..., description="Relative wiki page path")
+    title: str = Field(..., description="Page title")
+    updated_at: str = Field(..., description="Last modified time (ISO-8601)")
+    content: str = Field(..., description="Markdown page content")
+
+
+class WikiRebuildResponse(BaseModel):
+    """Response for wiki rebuild operations."""
+    person_id: str = Field(..., description="Person ID")
+    written_pages: int = Field(..., ge=0, description="Knowledge pages written")
+    removed_pages: int = Field(..., ge=0, description="Stale pages removed")
+
+
+# ============================================================================
 # Error Schemas
 # ============================================================================
 

@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     retrieval_score_threshold: float = 0.2
     retrieval_chunk_size: int = 1000
     retrieval_chunk_overlap: int = 200
+
+    # Persistent Wiki (Approach B)
+    wiki_root_dir: str = "data/wiki"
+    wiki_context_max_pages: int = 4
+    wiki_context_max_chars: int = 6000
     
     # Monitoring
     langsmith_api_key: str = ""
@@ -125,6 +130,22 @@ class Settings(BaseSettings):
             f"{values.get('postgres_host')}:{values.get('postgres_port')}/"
             f"{values.get('postgres_db')}"
         )
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug_flag(cls, v):
+        """Accept common non-boolean debug env values such as 'release'."""
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return True
+
+        text = str(v).strip().lower()
+        if text in {"1", "true", "yes", "on", "debug", "development"}:
+            return True
+        if text in {"0", "false", "no", "off", "release", "prod", "production"}:
+            return False
+        return v
     
     @property
     def redis_url(self) -> str:

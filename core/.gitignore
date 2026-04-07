@@ -55,6 +55,7 @@ dmypy.json
 *.log
 logs/
 data/logs/
+data/wiki/
 
 # Database
 *.db
