@@ -469,6 +469,46 @@ class DemoBootstrapResponse(BaseModel):
 
 
 # ============================================================================
+# Ingestion Schemas
+# ============================================================================
+
+class GitHubIngestRequest(BaseModel):
+    """Request payload for GitHub repository ingestion."""
+    owner: str = Field(..., min_length=1, max_length=200)
+    repo: str = Field(..., min_length=1, max_length=300)
+    person_id: Optional[str] = Field(
+        None,
+        description="Optional target person to receive a person-level summary entry",
+    )
+    max_items: int = Field(10, ge=1, le=50)
+    include_open_prs: bool = True
+    include_open_issues: bool = True
+    include_recent_merged_prs: bool = True
+    attach_to_person: bool = True
+    team_page_slug: Optional[str] = Field(None, max_length=300)
+    updated_by: Optional[str] = Field(None, max_length=255)
+
+
+class GitHubIngestCounts(BaseModel):
+    """Counts extracted from ingested repository snapshot."""
+    open_prs: int = Field(0, ge=0)
+    open_issues: int = Field(0, ge=0)
+    merged_prs: int = Field(0, ge=0)
+
+
+class GitHubIngestResponse(BaseModel):
+    """Response after ingesting GitHub data into wiki context."""
+    repository: str
+    source_url: str
+    fetched_at: str
+    counts: GitHubIngestCounts
+    team_page_path: str
+    synced_person_wikis: int = Field(..., ge=0)
+    person_id: Optional[str] = None
+    person_knowledge_id: Optional[str] = None
+
+
+# ============================================================================
 # Error Schemas
 # ============================================================================
 

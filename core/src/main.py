@@ -45,6 +45,9 @@ from src.models.schemas import (
     TeamKnowledgeUpsertRequest,
     TeamKnowledgeUpsertResponse,
     DemoBootstrapResponse,
+    GitHubIngestRequest,
+    GitHubIngestResponse,
+    GitHubIngestCounts,
 )
 from src.services.prompt_builder import (
     build_prompt,
@@ -68,6 +71,11 @@ from src.services.knowledge_service import (
 )
 from src.services.conversation_service import ensure_conversation, add_message
 from src.services.demo_seed_service import ensure_demo_seed_data
+from src.services.github_ingest_service import (
+    fetch_github_snapshot,
+    render_github_snapshot_markdown,
+    build_github_person_summary,
+)
 from src.services.wiki_service import (
     get_person_wiki_overview,
     read_person_wiki_page,
@@ -394,6 +402,66 @@ async def demo_bootstrap_endpoint():
     """Seed server-side demo team/person markdown data and return selector payload."""
     payload = ensure_demo_seed_data()
     return DemoBootstrapResponse(**payload)
+
+
+@app.post("/v1/ingest/github", response_model=GitHubIngestResponse, tags=["Ingestion"])
+async def ingest_github_repository_endpoint(request: GitHubIngestRequest):
+    """
+    Ingest GitHub repository state into team wiki and optionally selected person knowledge.
+    """
+    person = None
+    if request.person_id:
+        person = get_person(request.person_id)
+
+    snapshot = await fetch_github_snapshot(
+        owner=request.owner,
+        repo=request.repo,
+        max_items=request.max_items,
+        include_open_prs=request.include_open_prs,
+        include_open_issues=request.include_open_issues,
+        include_recent_merged_prs=request.include_recent_merged_prs,
+    )
+
+    team_page = upsert_team_knowledge_page(
+        title=f"GitHub Snapshot: {snapshot['repository']}",
+        content=render_github_snapshot_markdown(snapshot),
+        page_slug=request.team_page_slug or f"github-{request.owner}-{request.repo}",
+        source_reference=snapshot.get("repo_url"),
+        tags=["github", request.owner, request.repo],
+        updated_by=request.updated_by or "github-ingestor",
+        sync_person_wikis=True,
+    )
+
+    person_entry_id: str | None = None
+    if person and request.attach_to_person:
+        person_entry = add_knowledge_entry(
+            person.id,
+            KnowledgeEntryCreate(
+                title=f"GitHub Sync: {snapshot['repository']}",
+                content=build_github_person_summary(snapshot, person_name=person.name),
+                source_type="github_sync",
+                source_reference=snapshot.get("repo_url"),
+                tags=["github", request.owner, request.repo],
+                priority=7,
+                metadata={
+                    "integration": "github",
+                    "repository": snapshot.get("repository"),
+                    "fetched_at": snapshot.get("fetched_at"),
+                },
+            ),
+        )
+        person_entry_id = person_entry.id
+
+    return GitHubIngestResponse(
+        repository=str(snapshot.get("repository", f"{request.owner}/{request.repo}")),
+        source_url=str(snapshot.get("repo_url", "")),
+        fetched_at=str(snapshot.get("fetched_at", "")),
+        counts=GitHubIngestCounts(**snapshot.get("counts", {})),
+        team_page_path=str(team_page.get("page_path", "")),
+        synced_person_wikis=int(team_page.get("synced_person_wikis", 0)),
+        person_id=person.id if person else None,
+        person_knowledge_id=person_entry_id,
+    )
 
 
 @app.post("/v1/chat", response_model=ChatResponse, tags=["Chat"])

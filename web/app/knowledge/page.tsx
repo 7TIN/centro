@@ -20,9 +20,11 @@ import {
   demoBootstrap,
   getPersonWiki,
   getTeamWiki,
+  ingestGitHub,
   listKnowledgeEntries,
   upsertTeamKnowledge,
   type DemoBootstrapResponse,
+  type GitHubIngestResponse,
   type KnowledgeEntryResponse,
   type PersonWikiOverviewResponse,
   type TeamWikiOverviewResponse,
@@ -62,9 +64,13 @@ export default function KnowledgePage() {
 
   const [teamTitle, setTeamTitle] = useState("");
   const [teamContent, setTeamContent] = useState("");
+  const [githubOwner, setGitHubOwner] = useState("acme");
+  const [githubRepo, setGitHubRepo] = useState("payments-service");
+  const [githubMaxItems, setGitHubMaxItems] = useState("10");
   const [personTitle, setPersonTitle] = useState("");
   const [personContent, setPersonContent] = useState("");
   const [savingTeam, setSavingTeam] = useState(false);
+  const [ingestingGitHub, setIngestingGitHub] = useState(false);
   const [savingPerson, setSavingPerson] = useState(false);
 
   const loadAll = useCallback(
@@ -137,6 +143,40 @@ export default function KnowledgePage() {
       setError(getErrorMessage(submitError));
     } finally {
       setSavingTeam(false);
+    }
+  }
+
+  async function submitGitHubIngest() {
+    const owner = githubOwner.trim();
+    const repo = githubRepo.trim();
+    const parsedMaxItems = Number.parseInt(githubMaxItems, 10);
+    const maxItems = Number.isNaN(parsedMaxItems)
+      ? 10
+      : Math.max(1, Math.min(parsedMaxItems, 50));
+
+    if (!owner || !repo) {
+      return;
+    }
+
+    setIngestingGitHub(true);
+    setActionMessage(null);
+    try {
+      const response: GitHubIngestResponse = await ingestGitHub({
+        owner,
+        repo,
+        person_id: selectedPersonId ?? undefined,
+        max_items: maxItems,
+        attach_to_person: true,
+        updated_by: "knowledge-page-ui",
+      });
+      setActionMessage(
+        `GitHub ingested for ${response.repository}. Team page: ${response.team_page_path}. Synced ${response.synced_person_wikis} person wikis.`,
+      );
+      await loadAll(selectedPersonId);
+    } catch (submitError: unknown) {
+      setError(getErrorMessage(submitError));
+    } finally {
+      setIngestingGitHub(false);
     }
   }
 
@@ -232,6 +272,43 @@ export default function KnowledgePage() {
         {!loading && !error ? (
           <Card className="border-neutral-200 bg-white shadow-none">
             <CardHeader>
+              <CardTitle className="text-lg">Ingest From GitHub</CardTitle>
+              <CardDescription>
+                Fetch PRs/issues from a repo, update team wiki, and attach summary to selected person.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Input
+                  onChange={(event) => setGitHubOwner(event.target.value)}
+                  placeholder="Repo owner (org/user)"
+                  value={githubOwner}
+                />
+                <Input
+                  onChange={(event) => setGitHubRepo(event.target.value)}
+                  placeholder="Repository name"
+                  value={githubRepo}
+                />
+                <Input
+                  onChange={(event) => setGitHubMaxItems(event.target.value)}
+                  placeholder="Max items (1-50)"
+                  value={githubMaxItems}
+                />
+              </div>
+              <Button
+                disabled={ingestingGitHub || !githubOwner.trim() || !githubRepo.trim()}
+                onClick={() => void submitGitHubIngest()}
+                variant="outline"
+              >
+                {ingestingGitHub ? "Ingesting..." : "Ingest GitHub Snapshot"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!loading && !error ? (
+          <Card className="border-neutral-200 bg-white shadow-none">
+            <CardHeader>
               <CardTitle className="text-lg">Add Team Knowledge</CardTitle>
               <CardDescription>
                 Updates team wiki then syncs snapshots into all person wikis.
@@ -281,9 +358,7 @@ export default function KnowledgePage() {
                 value={personContent}
               />
               <Button
-                disabled={
-                  savingPerson || !selectedPersonId || !personContent.trim()
-                }
+                disabled={savingPerson || !selectedPersonId || !personContent.trim()}
                 onClick={() => void submitPersonKnowledge()}
                 variant="outline"
               >

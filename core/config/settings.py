@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com"
+
+    # External Integrations
+    github_token: str = ""
+    github_api_base_url: str = "https://api.github.com"
     
     # Vector Database (Optional for Phase 1)
     pinecone_api_key: str = ""

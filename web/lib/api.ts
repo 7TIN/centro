@@ -275,6 +275,34 @@ export type DemoBootstrapResponse = {
   default_person_id: string | null;
 };
 
+export type GitHubIngestPayload = {
+  owner: string;
+  repo: string;
+  person_id?: string;
+  max_items?: number;
+  include_open_prs?: boolean;
+  include_open_issues?: boolean;
+  include_recent_merged_prs?: boolean;
+  attach_to_person?: boolean;
+  team_page_slug?: string;
+  updated_by?: string;
+};
+
+export type GitHubIngestResponse = {
+  repository: string;
+  source_url: string;
+  fetched_at: string;
+  counts: {
+    open_prs: number;
+    open_issues: number;
+    merged_prs: number;
+  };
+  team_page_path: string;
+  synced_person_wikis: number;
+  person_id: string | null;
+  person_knowledge_id: string | null;
+};
+
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
@@ -421,6 +449,15 @@ export function upsertTeamKnowledge(
   payload: TeamKnowledgeUpsertPayload,
 ): Promise<TeamKnowledgeUpsertResponse> {
   return request<TeamKnowledgeUpsertResponse>("/v1/team/wiki/knowledge", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function ingestGitHub(
+  payload: GitHubIngestPayload,
+): Promise<GitHubIngestResponse> {
+  return request<GitHubIngestResponse>("/v1/ingest/github", {
     method: "POST",
     body: JSON.stringify(payload),
   });
