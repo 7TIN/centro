@@ -21,12 +21,14 @@ import {
   getPersonWiki,
   getTeamWiki,
   ingestGitHub,
+  ingestSlack,
   listKnowledgeEntries,
   upsertTeamKnowledge,
   type DemoBootstrapResponse,
   type GitHubIngestResponse,
   type KnowledgeEntryResponse,
   type PersonWikiOverviewResponse,
+  type SlackIngestResponse,
   type TeamWikiOverviewResponse,
 } from "@/lib/api";
 
@@ -64,13 +66,20 @@ export default function KnowledgePage() {
 
   const [teamTitle, setTeamTitle] = useState("");
   const [teamContent, setTeamContent] = useState("");
+
   const [githubOwner, setGitHubOwner] = useState("acme");
   const [githubRepo, setGitHubRepo] = useState("payments-service");
   const [githubMaxItems, setGitHubMaxItems] = useState("10");
+
+  const [slackChannelId, setSlackChannelId] = useState("C_RELEASE");
+  const [slackMaxMessages, setSlackMaxMessages] = useState("25");
+
   const [personTitle, setPersonTitle] = useState("");
   const [personContent, setPersonContent] = useState("");
+
   const [savingTeam, setSavingTeam] = useState(false);
   const [ingestingGitHub, setIngestingGitHub] = useState(false);
+  const [ingestingSlack, setIngestingSlack] = useState(false);
   const [savingPerson, setSavingPerson] = useState(false);
 
   const loadAll = useCallback(
@@ -177,6 +186,39 @@ export default function KnowledgePage() {
       setError(getErrorMessage(submitError));
     } finally {
       setIngestingGitHub(false);
+    }
+  }
+
+  async function submitSlackIngest() {
+    const channelId = slackChannelId.trim();
+    const parsedMax = Number.parseInt(slackMaxMessages, 10);
+    const maxMessages = Number.isNaN(parsedMax)
+      ? 25
+      : Math.max(1, Math.min(parsedMax, 100));
+
+    if (!channelId) {
+      return;
+    }
+
+    setIngestingSlack(true);
+    setActionMessage(null);
+    try {
+      const response: SlackIngestResponse = await ingestSlack({
+        channel_id: channelId,
+        person_id: selectedPersonId ?? undefined,
+        max_messages: maxMessages,
+        include_thread_replies: true,
+        attach_to_person: true,
+        updated_by: "knowledge-page-ui",
+      });
+      setActionMessage(
+        `Slack ingested for #${response.channel_name}. Team page: ${response.team_page_path}. Synced ${response.synced_person_wikis} person wikis.`,
+      );
+      await loadAll(selectedPersonId);
+    } catch (submitError: unknown) {
+      setError(getErrorMessage(submitError));
+    } finally {
+      setIngestingSlack(false);
     }
   }
 
@@ -301,6 +343,38 @@ export default function KnowledgePage() {
                 variant="outline"
               >
                 {ingestingGitHub ? "Ingesting..." : "Ingest GitHub Snapshot"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!loading && !error ? (
+          <Card className="border-neutral-200 bg-white shadow-none">
+            <CardHeader>
+              <CardTitle className="text-lg">Ingest From Slack</CardTitle>
+              <CardDescription>
+                Fetch latest channel messages/threads, update team wiki, and attach summary to selected person.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  onChange={(event) => setSlackChannelId(event.target.value)}
+                  placeholder="Slack channel ID (e.g. C01234567)"
+                  value={slackChannelId}
+                />
+                <Input
+                  onChange={(event) => setSlackMaxMessages(event.target.value)}
+                  placeholder="Max messages (1-100)"
+                  value={slackMaxMessages}
+                />
+              </div>
+              <Button
+                disabled={ingestingSlack || !slackChannelId.trim()}
+                onClick={() => void submitSlackIngest()}
+                variant="outline"
+              >
+                {ingestingSlack ? "Ingesting..." : "Ingest Slack Snapshot"}
               </Button>
             </CardContent>
           </Card>

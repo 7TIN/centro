@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     # External Integrations
     github_token: str = ""
     github_api_base_url: str = "https://api.github.com"
+    slack_token: str = ""
+    slack_api_base_url: str = "https://slack.com/api"
     
     # Vector Database (Optional for Phase 1)
     pinecone_api_key: str = ""

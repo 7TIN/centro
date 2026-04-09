@@ -303,6 +303,32 @@ export type GitHubIngestResponse = {
   person_knowledge_id: string | null;
 };
 
+export type SlackIngestPayload = {
+  channel_id: string;
+  person_id?: string;
+  max_messages?: number;
+  include_thread_replies?: boolean;
+  attach_to_person?: boolean;
+  team_page_slug?: string;
+  updated_by?: string;
+};
+
+export type SlackIngestResponse = {
+  workspace: string;
+  channel_id: string;
+  channel_name: string;
+  fetched_at: string;
+  counts: {
+    messages: number;
+    threads: number;
+    thread_replies: number;
+  };
+  team_page_path: string;
+  synced_person_wikis: number;
+  person_id: string | null;
+  person_knowledge_id: string | null;
+};
+
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
@@ -458,6 +484,15 @@ export function ingestGitHub(
   payload: GitHubIngestPayload,
 ): Promise<GitHubIngestResponse> {
   return request<GitHubIngestResponse>("/v1/ingest/github", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function ingestSlack(
+  payload: SlackIngestPayload,
+): Promise<SlackIngestResponse> {
+  return request<SlackIngestResponse>("/v1/ingest/slack", {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -48,6 +48,9 @@ from src.models.schemas import (
     GitHubIngestRequest,
     GitHubIngestResponse,
     GitHubIngestCounts,
+    SlackIngestRequest,
+    SlackIngestResponse,
+    SlackIngestCounts,
 )
 from src.services.prompt_builder import (
     build_prompt,
@@ -75,6 +78,11 @@ from src.services.github_ingest_service import (
     fetch_github_snapshot,
     render_github_snapshot_markdown,
     build_github_person_summary,
+)
+from src.services.slack_ingest_service import (
+    fetch_slack_channel_snapshot,
+    render_slack_snapshot_markdown,
+    build_slack_person_summary,
 )
 from src.services.wiki_service import (
     get_person_wiki_overview,
@@ -457,6 +465,66 @@ async def ingest_github_repository_endpoint(request: GitHubIngestRequest):
         source_url=str(snapshot.get("repo_url", "")),
         fetched_at=str(snapshot.get("fetched_at", "")),
         counts=GitHubIngestCounts(**snapshot.get("counts", {})),
+        team_page_path=str(team_page.get("page_path", "")),
+        synced_person_wikis=int(team_page.get("synced_person_wikis", 0)),
+        person_id=person.id if person else None,
+        person_knowledge_id=person_entry_id,
+    )
+
+
+@app.post("/v1/ingest/slack", response_model=SlackIngestResponse, tags=["Ingestion"])
+async def ingest_slack_channel_endpoint(request: SlackIngestRequest):
+    """
+    Ingest Slack channel snapshot into team wiki and optionally selected person knowledge.
+    """
+    person = None
+    if request.person_id:
+        person = get_person(request.person_id)
+
+    snapshot = await fetch_slack_channel_snapshot(
+        channel_id=request.channel_id,
+        max_messages=request.max_messages,
+        include_thread_replies=request.include_thread_replies,
+    )
+
+    team_page = upsert_team_knowledge_page(
+        title=f"Slack Snapshot: #{snapshot['channel_name']}",
+        content=render_slack_snapshot_markdown(snapshot),
+        page_slug=request.team_page_slug or f"slack-{request.channel_id}",
+        source_reference=snapshot.get("workspace_url"),
+        tags=["slack", snapshot.get("channel_id", request.channel_id)],
+        updated_by=request.updated_by or "slack-ingestor",
+        sync_person_wikis=True,
+    )
+
+    person_entry_id: str | None = None
+    if person and request.attach_to_person:
+        person_entry = add_knowledge_entry(
+            person.id,
+            KnowledgeEntryCreate(
+                title=f"Slack Sync: #{snapshot['channel_name']}",
+                content=build_slack_person_summary(snapshot, person_name=person.name),
+                source_type="slack_sync",
+                source_reference=snapshot.get("workspace_url"),
+                tags=["slack", snapshot.get("channel_id", request.channel_id)],
+                priority=7,
+                metadata={
+                    "integration": "slack",
+                    "workspace": snapshot.get("workspace"),
+                    "channel_id": snapshot.get("channel_id"),
+                    "channel_name": snapshot.get("channel_name"),
+                    "fetched_at": snapshot.get("fetched_at"),
+                },
+            ),
+        )
+        person_entry_id = person_entry.id
+
+    return SlackIngestResponse(
+        workspace=str(snapshot.get("workspace", "")),
+        channel_id=str(snapshot.get("channel_id", request.channel_id)),
+        channel_name=str(snapshot.get("channel_name", request.channel_id)),
+        fetched_at=str(snapshot.get("fetched_at", "")),
+        counts=SlackIngestCounts(**snapshot.get("counts", {})),
         team_page_path=str(team_page.get("page_path", "")),
         synced_person_wikis=int(team_page.get("synced_person_wikis", 0)),
         person_id=person.id if person else None,

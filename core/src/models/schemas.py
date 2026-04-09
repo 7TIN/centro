@@ -508,6 +508,40 @@ class GitHubIngestResponse(BaseModel):
     person_knowledge_id: Optional[str] = None
 
 
+class SlackIngestRequest(BaseModel):
+    """Request payload for Slack channel ingestion."""
+    channel_id: str = Field(..., min_length=1, max_length=200)
+    person_id: Optional[str] = Field(
+        None,
+        description="Optional target person to receive a person-level summary entry",
+    )
+    max_messages: int = Field(25, ge=1, le=100)
+    include_thread_replies: bool = True
+    attach_to_person: bool = True
+    team_page_slug: Optional[str] = Field(None, max_length=300)
+    updated_by: Optional[str] = Field(None, max_length=255)
+
+
+class SlackIngestCounts(BaseModel):
+    """Counts extracted from ingested Slack channel snapshot."""
+    messages: int = Field(0, ge=0)
+    threads: int = Field(0, ge=0)
+    thread_replies: int = Field(0, ge=0)
+
+
+class SlackIngestResponse(BaseModel):
+    """Response after ingesting Slack data into wiki context."""
+    workspace: str
+    channel_id: str
+    channel_name: str
+    fetched_at: str
+    counts: SlackIngestCounts
+    team_page_path: str
+    synced_person_wikis: int = Field(..., ge=0)
+    person_id: Optional[str] = None
+    person_knowledge_id: Optional[str] = None
+
+
 # ============================================================================
 # Error Schemas
 # ============================================================================
