@@ -64,6 +64,11 @@ def _sanitize_person_key(person_id: str) -> str:
     return cleaned
 
 
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "entry"
+
+
 def _person_wiki_dir(person_id: str) -> Path:
     return _persons_root_dir() / _sanitize_person_key(person_id)
 
@@ -191,6 +196,52 @@ def _default_team_pages() -> dict[str, str]:
     }
 
 
+def _build_team_index_page() -> str:
+    team_dir = _ensure_team_wiki_dirs()
+    knowledge_pages = sorted(
+        (team_dir / "knowledge").glob("*.md"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    lines: list[str] = [
+        "# Core Team Wiki",
+        "",
+        "- Purpose: Shared source of truth for the whole team.",
+        f"- Last Updated: {_utc_now_iso()}",
+        "",
+        "## Primary Pages",
+        "- [Current Status](status.md)",
+        "- [Shared Runbook](runbook.md)",
+        "- [Team Decisions](decisions.md)",
+        "- [Team Log](log.md)",
+        "",
+        "## Team Knowledge Pages",
+    ]
+    if not knowledge_pages:
+        lines.append("- None yet.")
+    else:
+        for page in knowledge_pages:
+            relative = page.relative_to(team_dir).as_posix()
+            title = _extract_title(_safe_read(page), fallback=page.stem)
+            updated_at = datetime.fromtimestamp(page.stat().st_mtime, tz=timezone.utc).isoformat()
+            lines.append(f"- [{title}]({relative}) - updated {updated_at}")
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "- Treat this wiki like the `main` branch.",
+            "- Person-specific wikis are like feature branches.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _write_team_index() -> None:
+    team_dir = _ensure_team_wiki_dirs()
+    (team_dir / "index.md").write_text(_build_team_index_page(), encoding="utf-8")
+
+
 def _append_team_log(action: str, details: str) -> None:
     team_dir = _ensure_team_wiki_dirs()
     log_path = team_dir / "log.md"
@@ -211,6 +262,7 @@ def ensure_team_wiki(seed_pages: dict[str, str] | None = None) -> None:
             continue
         page_path.write_text(content, encoding="utf-8")
         created += 1
+    _write_team_index()
     if created:
         _append_team_log("team_wiki_initialized", f"Initialized {created} team wiki pages.")
 
@@ -235,8 +287,50 @@ def write_team_wiki_page(
         )
     page_path.parent.mkdir(parents=True, exist_ok=True)
     page_path.write_text(content.strip() + "\n", encoding="utf-8")
+    _write_team_index()
     _append_team_log(log_action or "team_page_upsert", f"Updated team page `{page_name}`.")
     return page_path.relative_to(team_dir).as_posix()
+
+
+def upsert_team_knowledge_page(
+    title: str,
+    content: str,
+    page_slug: str | None = None,
+    source_reference: str | None = None,
+    tags: list[str] | None = None,
+    updated_by: str | None = None,
+    sync_person_wikis: bool = True,
+) -> dict[str, object]:
+    ensure_team_wiki()
+    slug = _slugify(page_slug or title)
+    tags_line = ", ".join(tags or [])
+    page_body = "\n".join(
+        [
+            f"# Team Knowledge: {title.strip()}",
+            "",
+            f"- Slug: {slug}",
+            f"- Updated At: {_utc_now_iso()}",
+            f"- Updated By: {updated_by or 'system'}",
+            f"- Source Reference: {source_reference or 'N/A'}",
+            f"- Tags: {tags_line or 'N/A'}",
+            "",
+            "## Content",
+            content.strip(),
+            "",
+        ]
+    )
+    relative_path = write_team_wiki_page(
+        page_name=f"knowledge/{slug}.md",
+        content=page_body,
+        log_action="team_knowledge_upsert",
+    )
+    synced = sync_team_to_all_person_wikis() if sync_person_wikis else 0
+    return {
+        "team_id": TEAM_WIKI_ID,
+        "page_path": relative_path,
+        "updated_at": _utc_now_iso(),
+        "synced_person_wikis": synced,
+    }
 
 
 def list_team_pages() -> list[dict[str, str]]:
@@ -545,6 +639,12 @@ def render_team_context(max_pages: int = 3, max_chars: int = 5000) -> str:
     team_dir = _team_wiki_dir()
     priority = ["index.md", "status.md", "runbook.md", "decisions.md"]
     pages: list[Path] = [team_dir / name for name in priority if (team_dir / name).exists()]
+    knowledge_pages = sorted(
+        (team_dir / "knowledge").glob("*.md"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    pages.extend(knowledge_pages)
     if max_pages > 0:
         pages = pages[:max_pages]
     blocks: list[str] = []

@@ -430,6 +430,24 @@ class TeamWikiPageResponse(BaseModel):
     content: str = Field(..., description="Markdown page content")
 
 
+class TeamKnowledgeUpsertRequest(BaseModel):
+    """Request to add/update a knowledge page in shared team wiki."""
+    title: str = Field(..., min_length=1, max_length=300)
+    content: str = Field(..., min_length=1)
+    page_slug: Optional[str] = Field(None, max_length=300)
+    source_reference: Optional[str] = Field(None, max_length=500)
+    tags: Optional[list[str]] = None
+    updated_by: Optional[str] = Field(None, max_length=255)
+
+
+class TeamKnowledgeUpsertResponse(BaseModel):
+    """Response after writing shared team knowledge page."""
+    team_id: str
+    page_path: str
+    updated_at: str
+    synced_person_wikis: int = Field(..., ge=0)
+
+
 class DemoPersonSummary(BaseModel):
     """Demo person descriptor returned to frontend selector."""
     id: str

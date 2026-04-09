@@ -42,6 +42,8 @@ from src.models.schemas import (
     WikiRebuildResponse,
     TeamWikiOverviewResponse,
     TeamWikiPageResponse,
+    TeamKnowledgeUpsertRequest,
+    TeamKnowledgeUpsertResponse,
     DemoBootstrapResponse,
 )
 from src.services.prompt_builder import (
@@ -72,6 +74,7 @@ from src.services.wiki_service import (
     rebuild_person_wiki,
     get_team_wiki_overview,
     read_team_wiki_page,
+    upsert_team_knowledge_page,
     render_team_context,
     render_person_context,
     sync_team_snapshot_for_person,
@@ -365,6 +368,25 @@ async def get_team_wiki_endpoint():
 async def read_team_wiki_page_endpoint(page_path: str):
     """Read an individual markdown page from shared team wiki."""
     return TeamWikiPageResponse(**read_team_wiki_page(page_path))
+
+
+@app.post(
+    "/v1/team/wiki/knowledge",
+    response_model=TeamKnowledgeUpsertResponse,
+    tags=["Wiki"],
+)
+async def upsert_team_knowledge_endpoint(request: TeamKnowledgeUpsertRequest):
+    """Upsert team knowledge and sync team snapshot into all person wikis."""
+    payload = upsert_team_knowledge_page(
+        title=request.title,
+        content=request.content,
+        page_slug=request.page_slug,
+        source_reference=request.source_reference,
+        tags=request.tags,
+        updated_by=request.updated_by,
+        sync_person_wikis=True,
+    )
+    return TeamKnowledgeUpsertResponse(**payload)
 
 
 @app.post("/v1/demo/bootstrap", response_model=DemoBootstrapResponse, tags=["Demo"])

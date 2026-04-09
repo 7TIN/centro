@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,12 +12,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ApiError,
+  addKnowledgeEntry,
   demoBootstrap,
   getPersonWiki,
   getTeamWiki,
   listKnowledgeEntries,
+  upsertTeamKnowledge,
   type DemoBootstrapResponse,
   type KnowledgeEntryResponse,
   type PersonWikiOverviewResponse,
@@ -48,22 +52,30 @@ export default function KnowledgePage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
   const [bootstrap, setBootstrap] = useState<DemoBootstrapResponse | null>(null);
   const [teamWiki, setTeamWiki] = useState<TeamWikiOverviewResponse | null>(null);
   const [personWiki, setPersonWiki] = useState<PersonWikiOverviewResponse | null>(null);
   const [entries, setEntries] = useState<KnowledgeEntryResponse[]>([]);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let canceled = false;
+  const [teamTitle, setTeamTitle] = useState("");
+  const [teamContent, setTeamContent] = useState("");
+  const [personTitle, setPersonTitle] = useState("");
+  const [personContent, setPersonContent] = useState("");
+  const [savingTeam, setSavingTeam] = useState(false);
+  const [savingPerson, setSavingPerson] = useState(false);
 
-    async function load() {
+  const loadAll = useCallback(
+    async (preferredPersonId?: string | null) => {
       setLoading(true);
       setError(null);
 
       try {
         const demo = await demoBootstrap();
         const resolvedPersonId =
+          preferredPersonId ||
           personIdFromQuery ||
           demo.default_person_id ||
           (demo.persons.length > 0 ? demo.persons[0].id : null);
@@ -74,33 +86,23 @@ export default function KnowledgePage() {
           resolvedPersonId ? listKnowledgeEntries(resolvedPersonId) : Promise.resolve([]),
         ]);
 
-        if (canceled) {
-          return;
-        }
-
         setBootstrap(demo);
         setSelectedPersonId(resolvedPersonId);
         setTeamWiki(team);
         setPersonWiki(personWikiResp);
         setEntries(knowledge);
       } catch (loadError: unknown) {
-        if (canceled) {
-          return;
-        }
         setError(getErrorMessage(loadError));
       } finally {
-        if (!canceled) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
-    }
+    },
+    [personIdFromQuery],
+  );
 
-    void load();
-
-    return () => {
-      canceled = true;
-    };
-  }, [personIdFromQuery]);
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
 
   const activePerson = useMemo(() => {
     if (!bootstrap || !selectedPersonId) {
@@ -109,6 +111,62 @@ export default function KnowledgePage() {
     return bootstrap.persons.find((person) => person.id === selectedPersonId) ?? null;
   }, [bootstrap, selectedPersonId]);
 
+  async function submitTeamKnowledge() {
+    const title = teamTitle.trim();
+    const content = teamContent.trim();
+    if (!title || !content) {
+      return;
+    }
+
+    setSavingTeam(true);
+    setActionMessage(null);
+    try {
+      const response = await upsertTeamKnowledge({
+        title,
+        content,
+        updated_by: "knowledge-page-ui",
+        tags: ["manual"],
+      });
+      setTeamTitle("");
+      setTeamContent("");
+      setActionMessage(
+        `Team knowledge updated: ${response.page_path} (synced ${response.synced_person_wikis} person wikis).`,
+      );
+      await loadAll(selectedPersonId);
+    } catch (submitError: unknown) {
+      setError(getErrorMessage(submitError));
+    } finally {
+      setSavingTeam(false);
+    }
+  }
+
+  async function submitPersonKnowledge() {
+    const content = personContent.trim();
+    if (!selectedPersonId || !content) {
+      return;
+    }
+
+    setSavingPerson(true);
+    setActionMessage(null);
+    try {
+      await addKnowledgeEntry(selectedPersonId, {
+        title: personTitle.trim() || undefined,
+        content,
+        source_type: "manual",
+        priority: 7,
+        metadata: { from: "knowledge-page-ui" },
+      });
+      setPersonTitle("");
+      setPersonContent("");
+      setActionMessage("Person knowledge added and markdown wiki updated.");
+      await loadAll(selectedPersonId);
+    } catch (submitError: unknown) {
+      setError(getErrorMessage(submitError));
+    } finally {
+      setSavingPerson(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-neutral-50 px-4 py-8 text-neutral-900 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -116,7 +174,7 @@ export default function KnowledgePage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Team + Person Knowledge</h1>
             <p className="text-sm text-neutral-600">
-              Team wiki is shared source of truth. Personal wiki adds selected teammate context.
+              Add new team or person knowledge and watch wiki updates/sync happen immediately.
             </p>
           </div>
           <Button asChild className="rounded-md" variant="outline">
@@ -136,27 +194,101 @@ export default function KnowledgePage() {
           </Card>
         ) : null}
 
+        {actionMessage ? (
+          <Card className="border-emerald-200 bg-emerald-50 shadow-none">
+            <CardContent className="py-4 text-sm text-emerald-700">{actionMessage}</CardContent>
+          </Card>
+        ) : null}
+
         {!loading && !error && bootstrap ? (
           <Card className="border-neutral-200 bg-white shadow-none">
             <CardHeader>
-              <CardTitle className="text-lg">Server Demo Bootstrap</CardTitle>
+              <CardTitle className="text-lg">Select Person Context</CardTitle>
               <CardDescription>
                 Team pages: {bootstrap.team_pages} · Persons: {bootstrap.persons.length} · Synced wikis: {bootstrap.synced_person_wikis}
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2 text-sm">
               {bootstrap.persons.map((person) => (
-                <p
+                <button
                   key={person.id}
-                  className={`rounded-md border px-3 py-2 ${
+                  className={`rounded-md border px-3 py-2 text-left ${
                     person.id === selectedPersonId
                       ? "border-neutral-800 bg-neutral-100 text-neutral-900"
                       : "border-neutral-200 bg-neutral-50 text-neutral-700"
                   }`}
+                  onClick={() => {
+                    void loadAll(person.id);
+                  }}
+                  type="button"
                 >
                   {person.name} {person.role ? `- ${person.role}` : ""}
-                </p>
+                </button>
               ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!loading && !error ? (
+          <Card className="border-neutral-200 bg-white shadow-none">
+            <CardHeader>
+              <CardTitle className="text-lg">Add Team Knowledge</CardTitle>
+              <CardDescription>
+                Updates team wiki then syncs snapshots into all person wikis.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Input
+                onChange={(event) => setTeamTitle(event.target.value)}
+                placeholder="Team knowledge title"
+                value={teamTitle}
+              />
+              <Textarea
+                className="min-h-[120px]"
+                onChange={(event) => setTeamContent(event.target.value)}
+                placeholder="Write shared team knowledge..."
+                value={teamContent}
+              />
+              <Button
+                disabled={savingTeam || !teamTitle.trim() || !teamContent.trim()}
+                onClick={() => void submitTeamKnowledge()}
+                variant="outline"
+              >
+                {savingTeam ? "Saving..." : "Add Team Knowledge"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!loading && !error ? (
+          <Card className="border-neutral-200 bg-white shadow-none">
+            <CardHeader>
+              <CardTitle className="text-lg">Add Knowledge To Selected Person</CardTitle>
+              <CardDescription>
+                Person wiki updates immediately and continues using team-first context.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Input
+                onChange={(event) => setPersonTitle(event.target.value)}
+                placeholder="Person knowledge title (optional)"
+                value={personTitle}
+              />
+              <Textarea
+                className="min-h-[120px]"
+                onChange={(event) => setPersonContent(event.target.value)}
+                placeholder="Write person-specific knowledge..."
+                value={personContent}
+              />
+              <Button
+                disabled={
+                  savingPerson || !selectedPersonId || !personContent.trim()
+                }
+                onClick={() => void submitPersonKnowledge()}
+                variant="outline"
+              >
+                {savingPerson ? "Saving..." : "Add Person Knowledge"}
+              </Button>
             </CardContent>
           </Card>
         ) : null}
@@ -226,22 +358,6 @@ export default function KnowledgePage() {
                     {entry.content}
                   </pre>
                 </article>
-              ))}
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {!loading && !error && activePerson ? (
-          <Card className="border-neutral-200 bg-white shadow-none">
-            <CardHeader>
-              <CardTitle className="text-lg">Suggested Questions ({activePerson.name})</CardTitle>
-              <CardDescription>Served from backend bootstrap metadata.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-2 text-sm">
-              {activePerson.suggested_questions.map((question, index) => (
-                <p key={question} className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-                  {index + 1}. {question}
-                </p>
               ))}
             </CardContent>
           </Card>

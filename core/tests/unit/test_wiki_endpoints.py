@@ -142,3 +142,41 @@ async def test_demo_bootstrap_creates_team_and_multiple_person_wikis():
         person_wiki = person_wiki_resp.json()
         person_page_paths = {page["path"] for page in person_wiki["pages"]}
         assert "synced/team_core_snapshot.md" in person_page_paths
+
+
+@pytest.mark.asyncio
+async def test_team_knowledge_upsert_updates_team_wiki_and_syncs_people():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        bootstrap_resp = await client.post("/v1/demo/bootstrap")
+        assert bootstrap_resp.status_code == 200
+        payload = bootstrap_resp.json()
+        default_person = payload["default_person_id"]
+        assert default_person
+
+        upsert_resp = await client.post(
+            "/v1/team/wiki/knowledge",
+            json={
+                "title": "Cache Invalidation Rule",
+                "content": "After risk-prone deploys, invalidate stale config cache before scaling traffic.",
+                "updated_by": "test-suite",
+                "tags": ["release", "cache"],
+            },
+        )
+        assert upsert_resp.status_code == 200
+        upsert_body = upsert_resp.json()
+        assert upsert_body["page_path"].startswith("knowledge/")
+        assert upsert_body["synced_person_wikis"] >= 1
+
+        team_wiki_resp = await client.get("/v1/team/wiki")
+        assert team_wiki_resp.status_code == 200
+        team_wiki = team_wiki_resp.json()
+        team_page_paths = {page["path"] for page in team_wiki["pages"]}
+        assert upsert_body["page_path"] in team_page_paths
+
+        snapshot_resp = await client.get(
+            f"/v1/persons/{default_person}/wiki/pages/synced/team_core_snapshot.md"
+        )
+        assert snapshot_resp.status_code == 200
+        snapshot = snapshot_resp.json()
+        assert "Cache Invalidation Rule" in snapshot["content"]

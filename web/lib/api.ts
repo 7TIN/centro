@@ -241,6 +241,22 @@ export type WikiPageResponse = {
   team_id?: string;
 };
 
+export type TeamKnowledgeUpsertPayload = {
+  title: string;
+  content: string;
+  page_slug?: string;
+  source_reference?: string;
+  tags?: string[];
+  updated_by?: string;
+};
+
+export type TeamKnowledgeUpsertResponse = {
+  team_id: string;
+  page_path: string;
+  updated_at: string;
+  synced_person_wikis: number;
+};
+
 export type DemoPersonSummary = {
   id: string;
   name: string;
@@ -398,5 +414,14 @@ export function getTeamWiki(): Promise<TeamWikiOverviewResponse> {
 export function getTeamWikiPage(pagePath: string): Promise<WikiPageResponse> {
   return request<WikiPageResponse>(`/v1/team/wiki/pages/${pagePath}`, {
     method: "GET",
+  });
+}
+
+export function upsertTeamKnowledge(
+  payload: TeamKnowledgeUpsertPayload,
+): Promise<TeamKnowledgeUpsertResponse> {
+  return request<TeamKnowledgeUpsertResponse>("/v1/team/wiki/knowledge", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
