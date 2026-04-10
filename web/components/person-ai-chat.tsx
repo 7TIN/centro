@@ -12,6 +12,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export type PersonAiChatMessage = {
   id: string;
@@ -123,19 +131,27 @@ export function PersonAiChat({
               <label className="sr-only" htmlFor="person-selector">
                 Select person
               </label>
-              <select
-                id="person-selector"
-                className="h-9 min-w-[180px] rounded-full border border-neutral-300 bg-white px-3 text-sm text-neutral-800"
+              <Select
+                value={selectedPersonId || ""}
+                onValueChange={(value) => {
+                  if (value) onSelectPerson(value);
+                }}
                 disabled={switchingPerson || persons.length === 0}
-                onChange={(event) => onSelectPerson(event.target.value)}
-                value={selectedPersonId ?? ""}
               >
-                {persons.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="h-9 min-w-[180px] rounded-full border border-neutral-300 bg-white px-3 text-sm text-neutral-800">
+                  <SelectValue placeholder="Select person" />
+                </SelectTrigger>
+
+                <SelectContent className="w-full">
+                  <SelectGroup>
+                    {persons.map((person) => (
+                      <SelectItem key={person.id} value={person.id}>
+                        {person.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
               <Button
                 asChild
                 variant="outline"
@@ -159,7 +175,9 @@ export function PersonAiChat({
                   <div className="flex h-full items-center justify-center">
                     <div className="text-center bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm max-w-sm">
                       <p className="text-sm text-neutral-500 leading-relaxed">
-                        Start chatting. Messages from <strong>Anon</strong> appear on the right, and messages from <strong>{personName}</strong> appear on the left.
+                        Start chatting. Messages from <strong>Anon</strong>{" "}
+                        appear on the right, and messages from{" "}
+                        <strong>{personName}</strong> appear on the left.
                       </p>
                     </div>
                   </div>
@@ -172,7 +190,9 @@ export function PersonAiChat({
                       key={message.id}
                       className={`flex w-full ${isAnon ? "justify-end" : "justify-start"}`}
                     >
-                      <div className={`flex max-w-[85%] md:max-w-[75%] flex-col gap-1 ${isAnon ? "items-end" : "items-start"}`}>
+                      <div
+                        className={`flex max-w-[85%] md:max-w-[75%] flex-col gap-1 ${isAnon ? "items-end" : "items-start"}`}
+                      >
                         <span className="text-[11px] font-semibold tracking-wide text-neutral-400 px-1 uppercase">
                           {isAnon ? "Anon" : personName}
                         </span>
@@ -216,7 +236,9 @@ export function PersonAiChat({
                   <div className="absolute right-2 bottom-2">
                     <Button
                       className="rounded-xl px-5 font-semibold shadow-sm transition-all"
-                      disabled={chatLoading || switchingPerson || !chatInput.trim()}
+                      disabled={
+                        chatLoading || switchingPerson || !chatInput.trim()
+                      }
                       onClick={onSend}
                       size="sm"
                     >
@@ -245,7 +267,9 @@ export function PersonAiChat({
         }`}
       >
         <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
-          <h2 className="text-sm font-semibold text-neutral-900">Suggested Questions</h2>
+          <h2 className="text-sm font-semibold text-neutral-900">
+            Suggested Questions
+          </h2>
           <Button
             className="h-8 rounded-md px-3"
             onClick={() => setDrawerOpen(false)}
